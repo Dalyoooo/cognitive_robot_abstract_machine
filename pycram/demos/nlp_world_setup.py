@@ -1,4 +1,5 @@
 import os
+import time
 
 import rclpy
 from pycram.datastructures.dataclasses import Context
@@ -65,6 +66,21 @@ def _stl(name):
     return STLParser(os.path.join(_OBJECTS_DIR, name)).parse()
 
 
+def _clear_markers(node, topic="/semworld/viz_marker"):
+    from rclpy.qos import DurabilityPolicy, QoSProfile
+    from visualization_msgs.msg import Marker, MarkerArray
+
+    qos = QoSProfile(depth=10, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+    pub = node.create_publisher(MarkerArray, topic, qos)
+    time.sleep(0.3)
+    marker = Marker()
+    marker.action = Marker.DELETEALL
+    arr = MarkerArray()
+    arr.markers.append(marker)
+    pub.publish(arr)
+    time.sleep(0.2)
+
+
 def build_world(robot_name="pr2", environment="apartment"):
     if robot_name not in ROBOTS:
         raise ValueError(
@@ -128,6 +144,7 @@ def build_world(robot_name="pr2", environment="apartment"):
         pass
 
     node = rclpy.create_node("viz_marker")
+    _clear_markers(node)
     VizMarkerPublisher(_world=world, node=node).with_tf_publisher()
 
     robot = robot_cls.from_world(world)

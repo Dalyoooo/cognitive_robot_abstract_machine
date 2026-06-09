@@ -178,6 +178,9 @@ def main():
     repos = [
         Repository("https://github.com/code-iai/iai_maps.git", "ros-jazzy", "iai_maps"),
         Repository(
+            "https://github.com/code-iai/iai_robots.git", "ros-jazzy", "iai_robots"
+        ),
+        Repository(
             "https://github.com/code-iai/iai_pr2.git", "ros-jazzy-main", "iai_pr2"
         ),
         Repository(
@@ -193,7 +196,7 @@ def main():
         ),
         Repository(
             "https://github.com/maltehue/ros2_robotiq_gripper.git",
-            "main",
+            "iai_dualarm",
             "ros2_robotiq_gripper",
             [
                 "robotiq_controllers",
@@ -208,10 +211,10 @@ def main():
             "Universal_Robots_ROS2_Description",
         ),
         Repository(
-            "https://github.com/code-iai/iai_stretch.git",
-            "ros2-jazzy",
-            "iai_stretch",
-            ["iai_stretch_bringup"],
+            "https://github.com/code-iai/stretch_ros2.git",
+            "joint_velocity_interface",
+            "stretch_ros2",
+            ["stretch_funmap"],
         ),
         Repository(
             "https://github.com/realsenseai/realsense-ros.git",

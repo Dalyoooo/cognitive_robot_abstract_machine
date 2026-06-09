@@ -22,6 +22,7 @@ from physics_simulators.base_simulator import (
     SimulatorConstraints,
 )
 from krrood.utils import recursive_subclasses
+from krrood.exceptions import DataclassException
 from scipy.spatial.transform import Rotation
 from trimesh.visual import TextureVisuals
 
@@ -132,7 +133,8 @@ class GeomVisibilityAndCollisionType(IntEnum):
     """
 
 
-class MultiSimError(Exception):
+@dataclass
+class MultiSimError(DataclassException):
     """Base class for all MultiSim-related exceptions."""
 
 
@@ -683,11 +685,13 @@ class MujocoEntityNotFoundError(MujocoError):
     Raised when a MuJoCo entity of a given type and name cannot be found.
     """
 
-    def __init__(
-        self, entity_name: str, entity_type: mujoco.mjtObj, action: str = "find"
-    ):
-        message = f"Failed to {action}: type={entity_type}, name='{entity_name}'"
-        super().__init__(message)
+    entity_name: str
+    entity_type: mujoco.mjtObj
+    action: str = "find"
+
+    def __post_init__(self):
+        self.message = f"Failed to {self.action}: type={self.entity_type}, name='{self.entity_name}'"
+        super().__post_init__()
 
 
 @dataclass
@@ -2386,7 +2390,7 @@ class _MultiSimStateCallback(StateChangeCallback):
 
     synchronizer: MultiSimSynchronizer = field(kw_only=True)
 
-    def _notify(self, **kwargs):
+    def on_state_change(self, **kwargs):
         self.synchronizer._on_state_change()
 
 
@@ -2432,7 +2436,7 @@ class MultiSimSynchronizer(ModelChangeCallback, ABC):
             synchronizer=self,
         )
 
-    def _notify(self, **kwargs):
+    def on_model_change(self, **kwargs):
         for modification in self._world._model_manager.model_modification_blocks[-1]:
             if isinstance(modification, AddKinematicStructureEntityModification):
                 entity = modification.kinematic_structure_entity
@@ -2448,7 +2452,7 @@ class MultiSimSynchronizer(ModelChangeCallback, ABC):
         if self._state_callback is not None:
             self._state_callback.stop()
             self._state_callback = None
-        self._world._model_manager.model_change_callbacks.remove(self)
+        super().stop()
 
     @abstractmethod
     def _on_state_change(self) -> None:

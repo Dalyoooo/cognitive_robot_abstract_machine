@@ -80,7 +80,7 @@ ENVIRONMENTS = {
     "kitchen": os.path.join(_RESOURCES, "worlds", "kitchen.urdf"),
 }
 
-_START_POSE = (0, 0, 0)
+_START_POSE = (1.5, 2.5, 0)
 
 ROOMS = [
     (Kitchen, "kitchen", 3.0, 2.5, 6.0, 4.5),

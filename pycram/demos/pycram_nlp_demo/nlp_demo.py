@@ -10,13 +10,17 @@ from semantic_digital_twin.adapters.ros.visualization.viz_marker import (
 )
 from semantic_digital_twin.reasoning.world_reasoner import WorldReasoner
 from semantic_digital_twin.robots.hsrb import HSRB
+from semantic_digital_twin.robots.justin import Justin
 from semantic_digital_twin.robots.pr2 import PR2
+from semantic_digital_twin.robots.stretch import Stretch
 from semantic_digital_twin.robots.tiago import Tiago
+from semantic_digital_twin.robots.unitree_g1 import UnitreeG1
 from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     Bottle,
     Bowl,
     Cereal,
     CounterTop,
+    Dishwasher,
     Spoon,
     Cup,
     Table,
@@ -24,7 +28,12 @@ from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     Mug,
     DrinkingContainer,
     Fork,
+    Fridge,
     Knife,
+    Kettle,
+    MustardBottle,
+    SoapBottle,
+    WineBottle,
     Apple,
     Book,
     CoffeeTable,
@@ -38,6 +47,7 @@ from semantic_digital_twin.semantic_annotations.semantic_annotations import (
 )
 from semantic_digital_twin.spatial_types.spatial_types import (
     HomogeneousTransformationMatrix,
+    Point3,
 )
 from semantic_digital_twin.world_description.connections import (
     DifferentialDrive,
@@ -59,14 +69,18 @@ _OBJECTS_DIR = os.path.join(_RESOURCES, "objects")
 ROBOTS = {
     "pr2": (PR2, OmniDrive),
     "hsrb": (HSRB, OmniDrive),
+    "stretch": (Stretch, DifferentialDrive),
     "tiago": (Tiago, DifferentialDrive),
+    "g1": (UnitreeG1, OmniDrive),
+    "justin": (Justin, OmniDrive),
 }
 
 ENVIRONMENTS = {
     "apartment": os.path.join(_RESOURCES, "worlds", "apartment.urdf"),
+    "kitchen": os.path.join(_RESOURCES, "worlds", "kitchen.urdf"),
 }
 
-_START_POSE = (1.5, 2.5, 0)
+_START_POSE = (0, 0, 0)
 
 ROOMS = [
     (Kitchen, "kitchen", 3.0, 2.5, 6.0, 4.5),
@@ -160,17 +174,10 @@ def place_objects(world):
         (Book, "book", 16.65, 2.78, 0.415, 0.20, 0.15, 0.03),
     ]
 
-    on_counter = [
-        (stl, _stl(stl), cls, x, y, z) for stl, cls, x, y, z in PLACED_ON_COUNTER
-    ]
-    in_body = [
-        (stl, _stl(stl), cls, parent, dx, dy, dz)
-        for stl, cls, parent, dx, dy, dz in PLACED_IN_BODY
-    ]
-
     object_annotations = []
     with world.modify_world():
-        for stl, sub, cls, x, y, z in on_counter:
+        for stl, cls, x, y, z in PLACED_ON_COUNTER:
+            sub = _stl(stl)
             world.merge_world_at_pose(
                 sub,
                 HomogeneousTransformationMatrix.from_xyz_quaternion(
@@ -179,32 +186,39 @@ def place_objects(world):
             )
             object_annotations.append(cls(root=world.get_body_by_name(stl)))
 
-        for stl, sub, cls, parent, dx, dy, dz in in_body:
-            world.merge_world(
-                sub,
-                FixedConnection(
-                    parent=world.get_body_by_name(parent),
-                    child=sub.root,
-                    parent_T_connection_expression=HomogeneousTransformationMatrix.from_xyz_rpy(
-                        dx, dy, dz
+        for stl, cls, parent, dx, dy, dz in PLACED_IN_BODY:
+            try:
+                sub = _stl(stl)
+                world.merge_world(
+                    sub,
+                    FixedConnection(
+                        parent=world.get_body_by_name(parent),
+                        child=sub.root,
+                        parent_T_connection_expression=HomogeneousTransformationMatrix.from_xyz_rpy(
+                            dx, dy, dz
+                        ),
                     ),
-                ),
-            )
-            object_annotations.append(cls(root=world.get_body_by_name(stl)))
+                )
+                object_annotations.append(cls(root=world.get_body_by_name(stl)))
+            except Exception as e:
+                print(f"[world] in-body {stl} skipped (parent {parent}): {e}", flush=True)
 
         for cls, name, parent, dx, dy, dz, sx, sy, sz in PRIMITIVE_IN_BODY:
-            sub = _primitive(name, Scale(sx, sy, sz))
-            world.merge_world(
-                sub,
-                FixedConnection(
-                    parent=world.get_body_by_name(parent),
-                    child=sub.root,
-                    parent_T_connection_expression=HomogeneousTransformationMatrix.from_xyz_rpy(
-                        dx, dy, dz
+            try:
+                sub = _primitive(name, Scale(sx, sy, sz))
+                world.merge_world(
+                    sub,
+                    FixedConnection(
+                        parent=world.get_body_by_name(parent),
+                        child=sub.root,
+                        parent_T_connection_expression=HomogeneousTransformationMatrix.from_xyz_rpy(
+                            dx, dy, dz
+                        ),
                     ),
-                ),
-            )
-            object_annotations.append(cls(root=world.get_body_by_name(name)))
+                )
+                object_annotations.append(cls(root=world.get_body_by_name(name)))
+            except Exception as e:
+                print(f"[world] primitive {name} skipped (parent {parent}): {e}", flush=True)
 
         for cls, name, x, y, z, sx, sy, sz in PRIMITIVE_OBJECTS:
             cls.create_with_new_body_in_world(
@@ -219,23 +233,40 @@ def place_objects(world):
     return object_annotations
 
 
+def _add_room(world, room_cls, name, cx, cy, w, d):
+    hw, hd = w / 2.0, d / 2.0
+    polytope = [
+        Point3(-hw, -hd, 0.0),
+        Point3(-hw, hd, 0.0),
+        Point3(hw, hd, 0.0),
+        Point3(hw, -hd, 0.0),
+    ]
+    floor = Floor.create_with_new_body_from_polytope_in_world(
+        name=PrefixedName(f"{name}_floor"),
+        world=world,
+        floor_polytope=polytope,
+        world_root_T_self=HomogeneousTransformationMatrix.from_xyz_rpy(cx, cy),
+    )
+    floor.root.collision = ShapeCollection([])
+    world.add_semantic_annotation(room_cls(floor=floor, name=PrefixedName(name)))
+
+
 def annotate_world(world, object_annotations):
     with world.modify_world():
         WorldReasoner(world).reason()
         world.add_semantic_annotations(object_annotations)
 
-        for surf_name, surf_cls, sample in (
-            ("island_countertop", CounterTop, True),
-            ("countertop", CounterTop, True),
-            ("table_area_main", Table, False),
-            ("coffee_table", CoffeeTable, False),
-            ("sofa", Sofa, False),
+        for surf_name, surf_cls in (
+            ("island_countertop", CounterTop),
+            ("countertop", CounterTop),
+            ("table_area_main", Table),
+            ("coffee_table", CoffeeTable),
+            ("sofa", Sofa),
         ):
             try:
                 surface = surf_cls(root=world.get_body_by_name(surf_name))
                 world.add_semantic_annotation(surface)
-                if sample:
-                    surface.calculate_supporting_surface()
+                surface.calculate_supporting_surface()
             except Exception as e:
                 print(f"[world] surface {surf_name} skipped: {e}", flush=True)
 
@@ -248,16 +279,120 @@ def annotate_world(world, object_annotations):
                 print(f"[world] fixture {fixture_name} skipped: {e}", flush=True)
 
         for room_cls, room_name, cx, cy, w, d in ROOMS:
-            floor = Floor.create_with_new_body_in_world(
-                name=PrefixedName(f"{room_name}_floor"),
-                world=world,
-                world_root_T_self=HomogeneousTransformationMatrix.from_xyz_rpy(cx, cy),
-                scale=Scale(w, d, 0.02),
-            )
-            floor.root.collision = ShapeCollection([])
-            world.add_semantic_annotation(
-                room_cls(floor=floor, name=PrefixedName(room_name))
-            )
+            _add_room(world, room_cls, room_name, cx, cy, w, d)
+
+
+def annotate_kitchen(world):
+    with world.modify_world():
+        WorldReasoner(world).reason()
+
+        for surf_name in ("kitchen_island_surface", "sink_area_surface"):
+            try:
+                surface = CounterTop(root=world.get_body_by_name(surf_name))
+                world.add_semantic_annotation(surface)
+                surface.calculate_supporting_surface()
+            except Exception as e:
+                print(f"[world] surface {surf_name} skipped: {e}", flush=True)
+
+        try:
+            table = Table(root=world.get_body_by_name("table_area_main"))
+            world.add_semantic_annotation(table)
+            table.calculate_supporting_surface()
+        except Exception as e:
+            print(f"[world] table table_area_main skipped: {e}", flush=True)
+
+        for fixture_name, fixture_cls in (
+            ("sink_area_sink", Sink),
+            ("oven_area_oven_main", Oven),
+            ("iai_fridge_main", Fridge),
+            ("sink_area_dish_washer_main", Dishwasher),
+        ):
+            try:
+                world.add_semantic_annotation(
+                    fixture_cls(root=world.get_body_by_name(fixture_name))
+                )
+            except Exception as e:
+                print(f"[world] fixture {fixture_name} skipped: {e}", flush=True)
+
+        _add_room(world, Kitchen, "kitchen", 2.0, 2.0, 5.0, 5.0)
+
+
+def _surface_point(world, surface_name):
+    """Sample a collision-aware point on an annotated surface; return world (x, y, top_z)."""
+    body = world.get_body_by_name(surface_name)
+    surface = next(
+        (
+            a
+            for a in world.semantic_annotations
+            if getattr(a, "root", None) is body
+            and hasattr(a, "sample_points_from_surface")
+        ),
+        None,
+    )
+    if surface is None:
+        raise RuntimeError(f"surface {surface_name!r} is not annotated")
+    point = surface.sample_points_from_surface()[0]
+    p = surface.supporting_surface.global_transform @ point
+    return float(p.x), float(p.y), float(p.z)
+
+
+_KITCHEN_STL = [
+    ("bowl.stl", Bowl, "kitchen_island_surface"),
+    ("jeroen_cup.stl", Mug, "kitchen_island_surface"),
+    ("breakfast_cereal.stl", Cereal, "kitchen_island_surface"),
+    ("milk.stl", Milk, "kitchen_island_surface"),
+    ("spoon.stl", Spoon, "kitchen_island_surface"),
+    ("Static_CokeBottle.stl", Bottle, "sink_area_surface"),
+]
+_KITCHEN_PRIMITIVES = [
+    (Plate, "plate", "table_area_main", 0.18, 0.18, 0.02),
+    (Apple, "apple", "kitchen_island_surface", 0.08, 0.08, 0.08),
+    (Fork, "fork", "table_area_main", 0.18, 0.02, 0.02),
+    (Knife, "knife", "table_area_main", 0.18, 0.015, 0.02),
+    (MustardBottle, "mustard_bottle", "kitchen_island_surface", 0.06, 0.06, 0.18),
+    (WineBottle, "wine_bottle", "table_area_main", 0.07, 0.07, 0.25),
+    (SoapBottle, "soap_bottle", "sink_area_surface", 0.06, 0.08, 0.15),
+    (Kettle, "kettle", "table_area_main", 0.12, 0.12, 0.18),
+]
+
+
+def place_objects_kitchen(world):
+    """Place each object resting on its target surface, at a collision-aware sampled
+    point, so is_supported_by holds and classify_world records its location. Requires
+    the surfaces to be annotated first (annotate_kitchen)."""
+    with world.modify_world():
+        for stl, cls, surf_name in _KITCHEN_STL:
+            try:
+                sub = _stl(stl)
+                half = sub.root.combined_mesh.extents[2] / 2.0
+                x, y, top = _surface_point(world, surf_name)
+                world.merge_world_at_pose(
+                    sub,
+                    HomogeneousTransformationMatrix.from_xyz_quaternion(
+                        x,
+                        y,
+                        top + half - min(0.05, 0.5 * half),
+                        reference_frame=world.root,
+                    ),
+                )
+                world.add_semantic_annotation(cls(root=world.get_body_by_name(stl)))
+            except Exception as e:
+                print(f"[world] kitchen object {stl} skipped: {e}", flush=True)
+
+        for cls, name, surf_name, sx, sy, sz in _KITCHEN_PRIMITIVES:
+            try:
+                half = sz / 2.0
+                x, y, top = _surface_point(world, surf_name)
+                cls.create_with_new_body_in_world(
+                    world=world,
+                    name=PrefixedName(name),
+                    world_root_T_self=HomogeneousTransformationMatrix.from_xyz_rpy(
+                        x=x, y=y, z=top + half - min(0.05, 0.5 * half)
+                    ),
+                    scale=Scale(sx, sy, sz),
+                )
+            except Exception as e:
+                print(f"[world] kitchen primitive {name} skipped: {e}", flush=True)
 
 
 def build_world(robot_name="pr2", environment="apartment"):
@@ -280,7 +415,11 @@ def build_world(robot_name="pr2", environment="apartment"):
         world.merge_world(robot_world, drive)
         drive.origin = HomogeneousTransformationMatrix.from_xyz_rpy(*_START_POSE)
 
-    object_annotations = place_objects(world)
+    if environment == "kitchen":
+        annotate_kitchen(world)
+        place_objects_kitchen(world)
+    else:
+        object_annotations = place_objects(world)
 
     try:
         rclpy.init()
@@ -294,7 +433,8 @@ def build_world(robot_name="pr2", environment="apartment"):
     robot = robot_cls.from_world(world)
     context = Context(world=world, robot=robot)
 
-    annotate_world(world, object_annotations)
+    if environment != "kitchen":
+        annotate_world(world, object_annotations)
 
     context.evaluate_conditions = False
     return world, robot, context, node

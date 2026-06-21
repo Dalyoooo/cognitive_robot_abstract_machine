@@ -178,7 +178,6 @@ def annotate_apartment(world):
             ("countertop", CounterTop),
             ("table_area_main", Table),
             ("coffee_table", CoffeeTable),
-            ("sofa", Sofa),
         ):
             try:
                 surface = surf_cls(root=world.get_body_by_name(surf_name))
@@ -214,7 +213,13 @@ def _surface_point(world, surface_name):
         raise RuntimeError(f"surface {surface_name!r} is not annotated")
     point = surface.sample_points_from_surface()[0]
     p = surface.supporting_surface.global_transform @ point
-    return float(p.x), float(p.y), float(p.z), surface
+    # Override z with actual surface top — supporting surface centers at
+    # collision_scale/2 (middle of mesh), but objects belong on the top.
+    if body.combined_mesh is not None:
+        top_z = body.global_pose.position.z + body.combined_mesh.bounds[1][2]
+    else:
+        top_z = float(p.z)
+    return float(p.x), float(p.y), top_z, surface
 
 
 _KITCHEN_STL = [
@@ -276,9 +281,13 @@ def place_objects_kitchen(world):
                     ),
                 )
                 world.add_semantic_annotation(cls(root=world.get_body_by_name(stl)))
-                surface.infer_objects_on_surface()
             except Exception as e:
                 print(f"[world] kitchen object {stl} skipped: {e}", flush=True)
+            else:
+                try:
+                    surface.infer_objects_on_surface()
+                except Exception:
+                    pass
 
         for cls, name, surf_name, sx, sy, sz in _KITCHEN_PRIMITIVES:
             try:
@@ -292,10 +301,14 @@ def place_objects_kitchen(world):
                     ),
                     scale=Scale(sx, sy, sz),
                 )
-                world.add_semantic_annotation(cls(root=world.get_body_by_name(name)))
-                surface.infer_objects_on_surface()
+                # create_with_new_body_in_world already adds the annotation
             except Exception as e:
                 print(f"[world] kitchen primitive {name} skipped: {e}", flush=True)
+            else:
+                try:
+                    surface.infer_objects_on_surface()
+                except Exception:
+                    pass
 
 
 def place_objects_apartment(world):
@@ -315,9 +328,13 @@ def place_objects_apartment(world):
                     ),
                 )
                 world.add_semantic_annotation(cls(root=world.get_body_by_name(stl)))
-                surface.infer_objects_on_surface()
             except Exception as e:
                 print(f"[world] apartment object {stl} skipped: {e}", flush=True)
+            else:
+                try:
+                    surface.infer_objects_on_surface()
+                except Exception:
+                    pass
 
         for cls, name, surf_name, sx, sy, sz in _APARTMENT_PRIMITIVES:
             try:
@@ -331,10 +348,14 @@ def place_objects_apartment(world):
                     ),
                     scale=Scale(sx, sy, sz),
                 )
-                world.add_semantic_annotation(cls(root=world.get_body_by_name(name)))
-                surface.infer_objects_on_surface()
+                # create_with_new_body_in_world already adds the annotation
             except Exception as e:
                 print(f"[world] apartment primitive {name} skipped: {e}", flush=True)
+            else:
+                try:
+                    surface.infer_objects_on_surface()
+                except Exception:
+                    pass
 
         for stl, cls, parent, dx, dy, dz in _APARTMENT_IN_DRAWER_STL:
             try:

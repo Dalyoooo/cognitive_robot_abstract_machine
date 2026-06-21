@@ -72,7 +72,7 @@ ROBOTS = {
 }
 
 ENVIRONMENTS = {
-    "apartment": os.path.join(_RESOURCES, "worlds", "apartment_without_walls.urdf"),
+    "apartment": os.path.join(_RESOURCES, "worlds", "apartment.urdf"),
     "kitchen": os.path.join(_RESOURCES, "worlds", "kitchen.urdf"),
 }
 
@@ -214,7 +214,7 @@ def _surface_point(world, surface_name):
         raise RuntimeError(f"surface {surface_name!r} is not annotated")
     point = surface.sample_points_from_surface()[0]
     p = surface.supporting_surface.global_transform @ point
-    return float(p.x), float(p.y), float(p.z)
+    return float(p.x), float(p.y), float(p.z), surface
 
 
 _KITCHEN_STL = [
@@ -265,7 +265,7 @@ def place_objects_kitchen(world):
             try:
                 sub = _stl(stl)
                 half = sub.root.combined_mesh.extents[2] / 2.0
-                x, y, top = _surface_point(world, surf_name)
+                x, y, top, surface = _surface_point(world, surf_name)
                 world.merge_world_at_pose(
                     sub,
                     HomogeneousTransformationMatrix.from_xyz_quaternion(
@@ -276,13 +276,14 @@ def place_objects_kitchen(world):
                     ),
                 )
                 world.add_semantic_annotation(cls(root=world.get_body_by_name(stl)))
+                surface.infer_objects_on_surface()
             except Exception as e:
                 print(f"[world] kitchen object {stl} skipped: {e}", flush=True)
 
         for cls, name, surf_name, sx, sy, sz in _KITCHEN_PRIMITIVES:
             try:
                 half = sz / 2.0
-                x, y, top = _surface_point(world, surf_name)
+                x, y, top, surface = _surface_point(world, surf_name)
                 cls.create_with_new_body_in_world(
                     world=world,
                     name=PrefixedName(name),
@@ -291,6 +292,8 @@ def place_objects_kitchen(world):
                     ),
                     scale=Scale(sx, sy, sz),
                 )
+                world.add_semantic_annotation(cls(root=world.get_body_by_name(name)))
+                surface.infer_objects_on_surface()
             except Exception as e:
                 print(f"[world] kitchen primitive {name} skipped: {e}", flush=True)
 
@@ -301,7 +304,7 @@ def place_objects_apartment(world):
             try:
                 sub = _stl(stl)
                 half = sub.root.combined_mesh.extents[2] / 2.0
-                x, y, top = _surface_point(world, surf_name)
+                x, y, top, surface = _surface_point(world, surf_name)
                 world.merge_world_at_pose(
                     sub,
                     HomogeneousTransformationMatrix.from_xyz_quaternion(
@@ -312,13 +315,14 @@ def place_objects_apartment(world):
                     ),
                 )
                 world.add_semantic_annotation(cls(root=world.get_body_by_name(stl)))
+                surface.infer_objects_on_surface()
             except Exception as e:
                 print(f"[world] apartment object {stl} skipped: {e}", flush=True)
 
         for cls, name, surf_name, sx, sy, sz in _APARTMENT_PRIMITIVES:
             try:
                 half = sz / 2.0
-                x, y, top = _surface_point(world, surf_name)
+                x, y, top, surface = _surface_point(world, surf_name)
                 cls.create_with_new_body_in_world(
                     world=world,
                     name=PrefixedName(name),
@@ -327,6 +331,8 @@ def place_objects_apartment(world):
                     ),
                     scale=Scale(sx, sy, sz),
                 )
+                world.add_semantic_annotation(cls(root=world.get_body_by_name(name)))
+                surface.infer_objects_on_surface()
             except Exception as e:
                 print(f"[world] apartment primitive {name} skipped: {e}", flush=True)
 

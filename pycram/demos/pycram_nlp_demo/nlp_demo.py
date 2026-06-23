@@ -76,7 +76,11 @@ ENVIRONMENTS = {
     "kitchen": os.path.join(_RESOURCES, "worlds", "kitchen.urdf"),
 }
 
-_START_POSE = (1.5, 2.5, 0)
+_START_POSES = {
+    "apartment": (1.5, 2.5, 0),
+    "kitchen": (0.3, 0.8, 0),
+}
+_DEFAULT_START_POSE = (1.5, 2.5, 0)
 
 ROOMS = [
     (Kitchen, "kitchen", 3.0, 2.5, 6.0, 4.5),
@@ -166,7 +170,7 @@ def annotate_kitchen(world):
             except Exception as e:
                 print(f"[world] fixture {fixture_name} skipped: {e}", flush=True)
 
-        _add_room(world, Kitchen, "kitchen", 2.0, 2.0, 5.0, 5.0)
+        _add_room(world, Kitchen, "kitchen", -1.0, 0.56, 5.6, 4.9)
 
 
 def annotate_apartment(world):
@@ -410,7 +414,9 @@ def build_world(robot_name="pr2", environment="apartment"):
             parent=world.root, child=robot_world.root, world=world
         )
         world.merge_world(robot_world, drive)
-        drive.origin = HomogeneousTransformationMatrix.from_xyz_rpy(*_START_POSE)
+        drive.origin = HomogeneousTransformationMatrix.from_xyz_rpy(
+            *_START_POSES.get(environment, _DEFAULT_START_POSE)
+        )
 
     if environment == "kitchen":
         annotate_kitchen(world)

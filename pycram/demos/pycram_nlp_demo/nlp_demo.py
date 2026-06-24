@@ -415,9 +415,8 @@ def build_world(robot_name="pr2", environment="apartment"):
 
     world = URDFParser.from_file(ENVIRONMENTS[environment]).parse()
     if robot_name == "pr2":
-        # Use base PR2 URDF without cable guide profiles.
         robot_world = URDFParser.from_file(
-            "package://iai_pr2_description/robots/pr2_calibrated_with_ft2.xml"
+            "package://iai_pr2_description/robots/pr2_with_ft2_cableguide.xacro"
         ).parse()
     else:
         robot_world = URDFParser.from_file(robot_cls.get_ros_file_path()).parse()

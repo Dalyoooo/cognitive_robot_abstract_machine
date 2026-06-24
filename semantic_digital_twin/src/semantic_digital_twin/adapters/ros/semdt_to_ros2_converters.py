@@ -220,7 +220,18 @@ class FileMeshToRos2Converter(ShapeToRos2Converter[Mesh]):
         marker.scale.x = data.scale.x
         marker.scale.y = data.scale.y
         marker.scale.z = data.scale.z
-        if data.mesh.visual.kind == TextureVisuals().kind:
+        material = getattr(data.mesh.visual, "material", None)
+        main_color = getattr(material, "main_color", None) if material is not None else None
+        if main_color is not None:
+            marker.mesh_use_embedded_materials = False
+            alpha = float(main_color[3]) / 255.0 if len(main_color) > 3 else 1.0
+            marker.color = ColorRGBA(
+                r=float(main_color[0]) / 255.0,
+                g=float(main_color[1]) / 255.0,
+                b=float(main_color[2]) / 255.0,
+                a=alpha,
+            )
+        elif data.mesh.visual.kind == TextureVisuals().kind:
             marker.mesh_use_embedded_materials = True
             marker.color = ColorRGBA(r=0.0, g=0.0, b=0.0, a=0.0)
         else:

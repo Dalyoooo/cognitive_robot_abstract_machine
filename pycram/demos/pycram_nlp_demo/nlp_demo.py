@@ -1,4 +1,5 @@
 import os
+import random
 import time
 
 import rclpy
@@ -53,7 +54,7 @@ from semantic_digital_twin.world_description.connections import (
     OmniDrive,
 )
 from semantic_digital_twin.datastructures.prefixed_name import PrefixedName
-from semantic_digital_twin.world_description.geometry import Scale
+from semantic_digital_twin.world_description.geometry import Color, Scale
 from semantic_digital_twin.world_description.world_entity import Body
 from semantic_digital_twin.world_description.shape_collection import (
     BoundingBoxCollection,
@@ -145,10 +146,6 @@ def annotate_kitchen(world):
         for surf_name in (
             "kitchen_island_surface",
             "sink_area_surface",
-            "kitchen_island",
-            "sink_area",
-            "fridge_area",
-            "oven_area_area",
         ):
             try:
                 surface = CounterTop(root=world.get_body_by_name(surf_name))
@@ -275,13 +272,89 @@ _APARTMENT_IN_DRAWER_PRIMITIVE = [
 ]
 
 
+_OBJECT_COLORS = {
+    "Bowl": (0.20, 0.40, 0.80),
+    "Mug": (0.80, 0.20, 0.20),
+    "Cereal": (0.80, 0.70, 0.20),
+    "Milk": (0.92, 0.92, 0.92),
+    "Spoon": (0.75, 0.75, 0.78),
+    "Bottle": (0.70, 0.10, 0.10),
+    "Plate": (0.92, 0.92, 0.92),
+    "Apple": (0.80, 0.15, 0.15),
+    "Fork": (0.75, 0.75, 0.78),
+    "Knife": (0.75, 0.75, 0.78),
+    "MustardBottle": (0.85, 0.72, 0.10),
+    "WineBottle": (0.45, 0.10, 0.12),
+    "SoapBottle": (0.20, 0.70, 0.30),
+    "Kettle": (0.20, 0.20, 0.22),
+}
+
+
+def _apply_color(body, cls):
+    """Set visual shape colours from the per-class colour map."""
+    rgb = _OBJECT_COLORS.get(cls.__name__)
+    if rgb is None:
+        return
+    color = Color(rgb[0], rgb[1], rgb[2], 1.0)
+    for shape in getattr(body.visual, "shapes", []):
+        shape.color = color
+
+
+def _sample_surface_xy(body, rng, margin=0.06):
+    """
+    Sample a world-frame XY position within margin-bounded AABB of *body*.
+    """
+    bounds = body.combined_mesh.bounds  # ((min), (max)) in body-local
+    lo_x = bounds[0][0] + margin
+    hi_x = bounds[1][0] - margin
+    lo_y = bounds[0][1] + margin
+    hi_y = bounds[1][1] - margin
+    px = body.global_pose.position.x
+    py = body.global_pose.position.y
+    if hi_x <= lo_x or hi_y <= lo_y:
+        return (
+            float(bounds[1][0] + bounds[0][0]) / 2.0 + px,
+            float(bounds[1][1] + bounds[0][1]) / 2.0 + py,
+        )
+    x_local = float(rng.uniform(lo_x, hi_x))
+    y_local = float(rng.uniform(lo_y, hi_y))
+    return x_local + px, y_local + py
+
+
+def _excluded_near_robot(x, y, start_pose):
+    """Return True if (x, y) is within 0.6 m of the robot start pose."""
+    sx, sy, _ = start_pose
+    return (x - sx) ** 2 + (y - sy) ** 2 < 0.36
+
+
 def place_objects_kitchen(world):
+    placed_xy = []
     with world.modify_world():
         for stl, cls, surf_name in _KITCHEN_STL:
             try:
                 sub = _stl(stl)
+                _apply_color(sub.root, cls)
                 half = sub.root.combined_mesh.extents[2] / 2.0
-                x, y, top, surface = _surface_point(world, surf_name)
+                surface_body = world.get_body_by_name(surf_name)
+                rng = random.Random()
+                radius = max(half, 0.05)
+                for _ in range(8):
+                    x, y = _sample_surface_xy(surface_body, rng, margin=0.06)
+                    if _excluded_near_robot(
+                        x, y, _START_POSES.get("kitchen", _DEFAULT_START_POSE)
+                    ):
+                        continue
+                    ok = True
+                    for px, py, pr in placed_xy:
+                        if (x - px) ** 2 + (y - py) ** 2 < (radius + pr) ** 2:
+                            ok = False
+                            break
+                    if ok:
+                        break
+                else:
+                    x, y, _, _ = _surface_point(world, surf_name)
+                placed_xy.append((x, y, radius))
+                _, _, top, surface = _surface_point(world, surf_name)
                 world.merge_world_at_pose(
                     sub,
                     HomogeneousTransformationMatrix.from_xyz_quaternion(
@@ -303,7 +376,26 @@ def place_objects_kitchen(world):
         for cls, name, surf_name, sx, sy, sz in _KITCHEN_PRIMITIVES:
             try:
                 half = sz / 2.0
-                x, y, top, surface = _surface_point(world, surf_name)
+                surface_body = world.get_body_by_name(surf_name)
+                rng = random.Random()
+                radius = max(half, 0.05)
+                for _ in range(8):
+                    x, y = _sample_surface_xy(surface_body, rng, margin=0.06)
+                    if _excluded_near_robot(
+                        x, y, _START_POSES.get("kitchen", _DEFAULT_START_POSE)
+                    ):
+                        continue
+                    ok = True
+                    for px, py, pr in placed_xy:
+                        if (x - px) ** 2 + (y - py) ** 2 < (radius + pr) ** 2:
+                            ok = False
+                            break
+                    if ok:
+                        break
+                else:
+                    x, y, _, _ = _surface_point(world, surf_name)
+                placed_xy.append((x, y, radius))
+                _, _, top, surface = _surface_point(world, surf_name)
                 cls.create_with_new_body_in_world(
                     world=world,
                     name=PrefixedName(name),
@@ -312,7 +404,7 @@ def place_objects_kitchen(world):
                     ),
                     scale=Scale(sx, sy, sz),
                 )
-                # create_with_new_body_in_world already adds the annotation
+                _apply_color(world.get_body_by_name(name), cls)
             except Exception as e:
                 print(f"[world] kitchen primitive {name} skipped: {e}", flush=True)
             else:
@@ -323,12 +415,33 @@ def place_objects_kitchen(world):
 
 
 def place_objects_apartment(world):
+    placed_xy = []
     with world.modify_world():
         for stl, cls, surf_name in _APARTMENT_STL:
             try:
                 sub = _stl(stl)
+                _apply_color(sub.root, cls)
                 half = sub.root.combined_mesh.extents[2] / 2.0
-                x, y, top, surface = _surface_point(world, surf_name)
+                surface_body = world.get_body_by_name(surf_name)
+                rng = random.Random()
+                radius = max(half, 0.05)
+                for _ in range(8):
+                    x, y = _sample_surface_xy(surface_body, rng, margin=0.06)
+                    if _excluded_near_robot(
+                        x, y, _START_POSES.get("apartment", _DEFAULT_START_POSE)
+                    ):
+                        continue
+                    ok = True
+                    for px, py, pr in placed_xy:
+                        if (x - px) ** 2 + (y - py) ** 2 < (radius + pr) ** 2:
+                            ok = False
+                            break
+                    if ok:
+                        break
+                else:
+                    x, y, _, _ = _surface_point(world, surf_name)
+                placed_xy.append((x, y, radius))
+                _, _, top, surface = _surface_point(world, surf_name)
                 world.merge_world_at_pose(
                     sub,
                     HomogeneousTransformationMatrix.from_xyz_quaternion(
@@ -350,7 +463,26 @@ def place_objects_apartment(world):
         for cls, name, surf_name, sx, sy, sz in _APARTMENT_PRIMITIVES:
             try:
                 half = sz / 2.0
-                x, y, top, surface = _surface_point(world, surf_name)
+                surface_body = world.get_body_by_name(surf_name)
+                rng = random.Random()
+                radius = max(half, 0.05)
+                for _ in range(8):
+                    x, y = _sample_surface_xy(surface_body, rng, margin=0.06)
+                    if _excluded_near_robot(
+                        x, y, _START_POSES.get("apartment", _DEFAULT_START_POSE)
+                    ):
+                        continue
+                    ok = True
+                    for px, py, pr in placed_xy:
+                        if (x - px) ** 2 + (y - py) ** 2 < (radius + pr) ** 2:
+                            ok = False
+                            break
+                    if ok:
+                        break
+                else:
+                    x, y, _, _ = _surface_point(world, surf_name)
+                placed_xy.append((x, y, radius))
+                _, _, top, surface = _surface_point(world, surf_name)
                 cls.create_with_new_body_in_world(
                     world=world,
                     name=PrefixedName(name),
@@ -359,7 +491,7 @@ def place_objects_apartment(world):
                     ),
                     scale=Scale(sx, sy, sz),
                 )
-                # create_with_new_body_in_world already adds the annotation
+                _apply_color(world.get_body_by_name(name), cls)
             except Exception as e:
                 print(f"[world] apartment primitive {name} skipped: {e}", flush=True)
             else:
@@ -371,6 +503,7 @@ def place_objects_apartment(world):
         for stl, cls, parent, dx, dy, dz in _APARTMENT_IN_DRAWER_STL:
             try:
                 sub = _stl(stl)
+                _apply_color(sub.root, cls)
                 world.merge_world(
                     sub,
                     FixedConnection(
@@ -388,6 +521,7 @@ def place_objects_apartment(world):
         for cls, name, parent, dx, dy, dz, sx, sy, sz in _APARTMENT_IN_DRAWER_PRIMITIVE:
             try:
                 sub = _primitive(name, Scale(sx, sy, sz))
+                _apply_color(sub.root, cls)
                 world.merge_world(
                     sub,
                     FixedConnection(

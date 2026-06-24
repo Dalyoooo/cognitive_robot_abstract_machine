@@ -346,11 +346,17 @@ class URDFParser:
             elif isinstance(geom.geometry, urdfpy.Mesh):
                 if geom.geometry.filename is None:
                     raise ValueError("Mesh geometry must have a filename.")
+                color = (
+                    Color(*(material_dict.get(geom.material.name) or (1, 1, 1, 1)))
+                    if hasattr(geom, "material") and geom.material
+                    else Color(1, 1, 1, 1)
+                )
                 res.append(
                     Mesh(
                         origin=origin_transform,
                         filename=self.path_resolver.resolve(geom.geometry.filename),
                         scale=Scale(*(geom.geometry.scale or (1, 1, 1))),
+                        color=color,
                     )
                 )
         return ShapeCollection(res, reference_frame=body)

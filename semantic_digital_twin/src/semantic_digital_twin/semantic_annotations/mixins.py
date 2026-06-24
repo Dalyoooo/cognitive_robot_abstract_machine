@@ -729,14 +729,18 @@ class HasSupportingSurface(HasStorageSpace, ABC):
         candidates_filtered = candidates.submesh([clear_mask], append=True)
 
         # --- Build the region ---
+        # Flatten points to top-face Z. Region.from_3d_points centres the
+        # points, so the connection offset must equal top_z.
+        all_z = candidates_filtered.vertices[:, 2]
+        top_z = float(np.max(all_z))
         points_3d = [
             Point3(
                 x,
                 y,
-                z,
+                top_z,
                 reference_frame=self.root,
             )
-            for x, y, z in candidates_filtered.vertices
+            for x, y, _ in candidates_filtered.vertices
         ]
         supporting_surface = Region.from_3d_points(
             name=PrefixedName(
@@ -746,7 +750,7 @@ class HasSupportingSurface(HasStorageSpace, ABC):
             points_3d=points_3d,
         )
 
-        supporting_surface_z_position = self.root.collision.scale.z / 2
+        supporting_surface_z_position = top_z
         self_C_supporting_surface = FixedConnection(
             parent=self.root,
             child=supporting_surface,
@@ -774,9 +778,13 @@ class HasSupportingSurface(HasStorageSpace, ABC):
                 supporting_body=self.root,
             )
         )
-        objects = an(entity(
-            semantic_annotation := variable(HasRootBody, domain=self._world.semantic_annotations)
-        ).where(semantic_annotation.root == body)).evaluate()
+        objects = an(
+            entity(
+                semantic_annotation := variable(
+                    HasRootBody, domain=self._world.semantic_annotations
+                )
+            ).where(semantic_annotation.root == body)
+        ).evaluate()
         for obj in objects:
             if obj in self.objects:
                 continue

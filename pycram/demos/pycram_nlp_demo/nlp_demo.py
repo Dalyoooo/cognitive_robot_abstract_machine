@@ -142,7 +142,14 @@ def annotate_kitchen(world):
     with world.modify_world():
         WorldReasoner(world).reason()
 
-        for surf_name in ("kitchen_island_surface", "sink_area_surface"):
+        for surf_name in (
+            "kitchen_island_surface",
+            "sink_area_surface",
+            "kitchen_island",
+            "sink_area",
+            "fridge_area",
+            "oven_area_area",
+        ):
             try:
                 surface = CounterTop(root=world.get_body_by_name(surf_name))
                 world.add_semantic_annotation(surface)
@@ -407,7 +414,13 @@ def build_world(robot_name="pr2", environment="apartment"):
     robot_cls, drive_cls = ROBOTS[robot_name]
 
     world = URDFParser.from_file(ENVIRONMENTS[environment]).parse()
-    robot_world = URDFParser.from_file(robot_cls.get_ros_file_path()).parse()
+    if robot_name == "pr2":
+        # Use base PR2 URDF without cable guide profiles.
+        robot_world = URDFParser.from_file(
+            "package://iai_pr2_description/robots/pr2_calibrated_with_ft2.xml"
+        ).parse()
+    else:
+        robot_world = URDFParser.from_file(robot_cls.get_ros_file_path()).parse()
 
     with world.modify_world():
         drive = drive_cls.create_with_dofs(

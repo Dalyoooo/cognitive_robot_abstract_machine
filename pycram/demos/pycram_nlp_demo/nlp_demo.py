@@ -36,6 +36,7 @@ from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     WineBottle,
     Apple,
     CoffeeTable,
+    SideTable,
     Sofa,
     Plate,
     Oven,
@@ -186,6 +187,8 @@ def annotate_apartment(world):
             ("countertop", CounterTop),
             ("table_area_main", Table),
             ("coffee_table", CoffeeTable),
+            ("sofa", Sofa),
+            ("bedside_table", SideTable),
         ):
             try:
                 surface = surf_cls(root=world.get_body_by_name(surf_name))
@@ -194,7 +197,11 @@ def annotate_apartment(world):
             except Exception as e:
                 print(f"[world] surface {surf_name} skipped: {e}", flush=True)
 
-        for fixture_name, fixture_cls in (("sink", Sink), ("oven", Oven)):
+        for fixture_name, fixture_cls in (
+            ("sink", Sink),
+            ("oven", Oven),
+            ("cabinet7", Dishwasher),
+        ):
             try:
                 world.add_semantic_annotation(
                     fixture_cls(root=world.get_body_by_name(fixture_name))
@@ -227,6 +234,10 @@ def _surface_point(world, surface_name):
         top_z = body.global_pose.position.z + body.combined_mesh.bounds[1][2]
     else:
         top_z = float(p.z)
+    if surface.supporting_surface is not None:
+        surface_z = float(surface.supporting_surface.global_transform.translation[2])
+        if surface_z < top_z:
+            top_z = surface_z
     return float(p.x), float(p.y), top_z, surface
 
 

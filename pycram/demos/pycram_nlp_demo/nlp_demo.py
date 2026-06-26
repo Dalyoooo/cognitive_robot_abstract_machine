@@ -37,7 +37,6 @@ from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     Apple,
     CoffeeTable,
     SideTable,
-    Sofa,
     Plate,
     Oven,
     Sink,
@@ -187,7 +186,6 @@ def annotate_apartment(world):
             ("countertop", CounterTop),
             ("table_area_main", Table),
             ("coffee_table", CoffeeTable),
-            ("sofa", Sofa),
             ("bedside_table", SideTable),
         ):
             try:
@@ -228,17 +226,7 @@ def _surface_point(world, surface_name):
         raise RuntimeError(f"surface {surface_name!r} is not annotated")
     point = surface.sample_points_from_surface()[0]
     p = surface.supporting_surface.global_transform @ point
-    # Override z with actual surface top — supporting surface centers at
-    # collision_scale/2 (middle of mesh), but objects belong on the top.
-    if body.combined_mesh is not None:
-        top_z = body.global_pose.position.z + body.combined_mesh.bounds[1][2]
-    else:
-        top_z = float(p.z)
-    if surface.supporting_surface is not None:
-        surface_z = float(surface.supporting_surface.global_transform.translation[2])
-        if surface_z < top_z:
-            top_z = surface_z
-    return float(p.x), float(p.y), top_z, surface
+    return float(p.x), float(p.y), float(p.z), surface
 
 
 _KITCHEN_STL = [

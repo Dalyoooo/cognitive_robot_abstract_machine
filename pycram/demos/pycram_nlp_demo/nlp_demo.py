@@ -1,5 +1,4 @@
 import os
-import random
 import time
 
 import rclpy
@@ -17,32 +16,38 @@ from semantic_digital_twin.robots.stretch import Stretch
 from semantic_digital_twin.robots.tiago import Tiago
 from semantic_digital_twin.robots.unitree_g1 import UnitreeG1
 from semantic_digital_twin.semantic_annotations.semantic_annotations import (
+    Apple,
     Bottle,
     Bowl,
     Cereal,
+    CheezeIt,
+    CoffeeTable,
     CounterTop,
-    Dishwasher,
-    Spoon,
     Cup,
-    Table,
-    Milk,
-    Mug,
+    Dishwasher,
+    Floor,
     Fork,
     Fridge,
-    Knife,
+    GelatinBox,
     Kettle,
-    MustardBottle,
-    SoapBottle,
-    WineBottle,
-    Apple,
-    CoffeeTable,
-    SideTable,
-    Plate,
-    Oven,
-    Sink,
     Kitchen,
+    Knife,
     LivingRoom,
-    Floor,
+    Milk,
+    Mug,
+    MustardBottle,
+    Oven,
+    Plate,
+    Pringles,
+    SaltContainer,
+    SideTable,
+    Sink,
+    SoapBottle,
+    Spoon,
+    Table,
+    TomatoSoup,
+    TunaCan,
+    WineBottle,
 )
 from semantic_digital_twin.spatial_types.spatial_types import (
     HomogeneousTransformationMatrix,
@@ -230,36 +235,86 @@ def _surface_point(world, surface_name):
 
 
 _KITCHEN_STL = [
-    ("bowl.stl", Bowl, "kitchen_island_surface"),
-    ("jeroen_cup.stl", Mug, "kitchen_island_surface"),
-    ("breakfast_cereal.stl", Cereal, "kitchen_island_surface"),
-    ("milk.stl", Milk, "kitchen_island_surface"),
-    ("spoon.stl", Spoon, "kitchen_island_surface"),
-    ("Static_CokeBottle.stl", Bottle, "sink_area_surface"),
+    ("bowl.stl", Bowl, "kitchen_island_surface", 0.0, -0.10),
+    ("jeroen_cup.stl", Mug, "kitchen_island_surface", 0.20, -0.10),
+    ("breakfast_cereal.stl", Cereal, "oven_area_area", 0.0, 0.0),
+    ("milk.stl", Milk, "fridge_area", -0.15, -0.10),
+    ("Static_CokeBottle.stl", Bottle, "sink_area_surface", -0.15, 0.0),
 ]
 _KITCHEN_PRIMITIVES = [
-    (Plate, "plate", "table_area_main", 0.18, 0.18, 0.02),
-    (Apple, "apple", "kitchen_island_surface", 0.08, 0.08, 0.08),
-    (Fork, "fork", "table_area_main", 0.18, 0.02, 0.02),
-    (Knife, "knife", "table_area_main", 0.18, 0.015, 0.02),
-    (MustardBottle, "mustard_bottle", "kitchen_island_surface", 0.06, 0.06, 0.18),
-    (WineBottle, "wine_bottle", "table_area_main", 0.07, 0.07, 0.25),
-    (SoapBottle, "soap_bottle", "sink_area_surface", 0.06, 0.08, 0.15),
-    (Kettle, "kettle", "table_area_main", 0.12, 0.12, 0.18),
+    (Plate, "plate", "table_area_main", -0.15, -0.10, 0.18, 0.18, 0.02),
+    (Apple, "apple", "kitchen_island_surface", -0.20, 0.10, 0.08, 0.08, 0.08),
+    (MustardBottle, "mustard_bottle", "fridge_area", 0.15, -0.10, 0.06, 0.06, 0.18),
+    (WineBottle, "wine_bottle", "table_area_main", -0.15, 0.15, 0.07, 0.07, 0.25),
+    (SoapBottle, "soap_bottle", "sink_area_surface", 0.15, 0.0, 0.06, 0.08, 0.15),
+    (Kettle, "kettle", "table_area_main", 0.20, 0.15, 0.12, 0.12, 0.18),
+    (CheezeIt, "cheezeit", "kitchen_island_surface", 0.20, 0.10, 0.06, 0.06, 0.12),
+    (Pringles, "pringles", "fridge_area", -0.15, 0.10, 0.07, 0.07, 0.20),
+    (GelatinBox, "gelatinbox", "fridge_area", 0.15, 0.10, 0.06, 0.06, 0.08),
+]
+_KITCHEN_IN_DRAWER_STL = [
+    ("spoon.stl", Spoon, "kitchen_island_left_upper_drawer_main", -0.05, 0.0, 0.0),
+]
+_KITCHEN_IN_DRAWER_PRIMITIVE = [
+    (
+        Fork,
+        "fork",
+        "kitchen_island_right_upper_drawer_main",
+        -0.05,
+        0.0,
+        0.0,
+        0.18,
+        0.02,
+        0.02,
+    ),
+    (
+        Knife,
+        "knife",
+        "kitchen_island_middle_upper_drawer_main",
+        -0.05,
+        0.0,
+        0.0,
+        0.18,
+        0.015,
+        0.02,
+    ),
+    (
+        TunaCan,
+        "tunacan",
+        "sink_area_left_upper_drawer_main",
+        0.0,
+        0.0,
+        0.0,
+        0.06,
+        0.06,
+        0.08,
+    ),
+    (
+        SaltContainer,
+        "saltcontainer",
+        "sink_area_left_middle_drawer_main",
+        0.0,
+        0.0,
+        0.0,
+        0.05,
+        0.05,
+        0.12,
+    ),
+    (TomatoSoup, "tomatosoup", "iai_fridge_main", 0.05, 0.0, 0.05, 0.06, 0.06, 0.10),
 ]
 
 _APARTMENT_STL = [
-    ("bowl.stl", Bowl, "island_countertop"),
-    ("breakfast_cereal.stl", Cereal, "island_countertop"),
-    ("milk.stl", Milk, "island_countertop"),
-    ("Static_CokeBottle.stl", Bottle, "countertop"),
-    ("jeroen_cup.stl", Mug, "table_area_main"),
+    ("bowl.stl", Bowl, "island_countertop", -0.20, -0.10),
+    ("breakfast_cereal.stl", Cereal, "island_countertop", 0.20, -0.10),
+    ("milk.stl", Milk, "island_countertop", -0.20, 0.10),
+    ("Static_CokeBottle.stl", Bottle, "countertop", 0.0, 0.0),
+    ("jeroen_cup.stl", Mug, "table_area_main", 0.0, 0.0),
 ]
 _APARTMENT_PRIMITIVES = [
-    (Plate, "plate", "table_area_main", 0.18, 0.18, 0.02),
-    (Plate, "plate_counter", "countertop", 0.18, 0.18, 0.02),
-    (Apple, "apple", "table_area_main", 0.08, 0.08, 0.08),
-    (Apple, "apple_island", "island_countertop", 0.08, 0.08, 0.08),
+    (Plate, "plate", "table_area_main", -0.15, -0.10, 0.18, 0.18, 0.02),
+    (Plate, "plate_counter", "countertop", 0.15, -0.10, 0.18, 0.18, 0.02),
+    (Apple, "apple", "table_area_main", -0.15, 0.10, 0.08, 0.08, 0.08),
+    (Apple, "apple_island", "island_countertop", 0.15, 0.10, 0.08, 0.08, 0.08),
 ]
 _APARTMENT_IN_DRAWER_STL = [
     ("spoon.stl", Spoon, "cabinet10_drawer_top", -0.05, -0.10, 0.0),
@@ -286,6 +341,12 @@ _OBJECT_COLORS = {
     "WineBottle": (0.45, 0.10, 0.12),
     "SoapBottle": (0.20, 0.70, 0.30),
     "Kettle": (0.20, 0.20, 0.22),
+    "TunaCan": (0.70, 0.50, 0.30),
+    "CheezeIt": (0.90, 0.60, 0.05),
+    "Pringles": (0.90, 0.10, 0.10),
+    "GelatinBox": (0.60, 0.30, 0.70),
+    "TomatoSoup": (0.80, 0.10, 0.10),
+    "SaltContainer": (0.85, 0.85, 0.85),
 }
 
 
@@ -299,27 +360,6 @@ def _apply_color(body, cls):
         shape.color = color
 
 
-def _sample_surface_xy(body, rng, margin=0.06):
-    """
-    Sample a world-frame XY position within margin-bounded AABB of *body*.
-    """
-    bounds = body.combined_mesh.bounds  # ((min), (max)) in body-local
-    lo_x = bounds[0][0] + margin
-    hi_x = bounds[1][0] - margin
-    lo_y = bounds[0][1] + margin
-    hi_y = bounds[1][1] - margin
-    px = body.global_pose.position.x
-    py = body.global_pose.position.y
-    if hi_x <= lo_x or hi_y <= lo_y:
-        return (
-            float(bounds[1][0] + bounds[0][0]) / 2.0 + px,
-            float(bounds[1][1] + bounds[0][1]) / 2.0 + py,
-        )
-    x_local = float(rng.uniform(lo_x, hi_x))
-    y_local = float(rng.uniform(lo_y, hi_y))
-    return x_local + px, y_local + py
-
-
 def _excluded_near_robot(x, y, start_pose):
     """Return True if (x, y) is within 0.6 m of the robot start pose."""
     sx, sy, _ = start_pose
@@ -329,36 +369,19 @@ def _excluded_near_robot(x, y, start_pose):
 def place_objects_kitchen(world):
     placed_xy = []
     with world.modify_world():
-        for stl, cls, surf_name in _KITCHEN_STL:
+        for stl, cls, surf_name, x_off, y_off in _KITCHEN_STL:
             try:
                 sub = _stl(stl)
                 _apply_color(sub.root, cls)
                 half = sub.root.combined_mesh.extents[2] / 2.0
-                surface_body = world.get_body_by_name(surf_name)
-                rng = random.Random()
-                radius = max(half, 0.05)
-                for _ in range(8):
-                    x, y = _sample_surface_xy(surface_body, rng, margin=0.06)
-                    if _excluded_near_robot(
-                        x, y, _START_POSES.get("kitchen", _DEFAULT_START_POSE)
-                    ):
-                        continue
-                    ok = True
-                    for px, py, pr in placed_xy:
-                        if (x - px) ** 2 + (y - py) ** 2 < (radius + pr) ** 2:
-                            ok = False
-                            break
-                    if ok:
-                        break
-                else:
-                    x, y, _, _ = _surface_point(world, surf_name)
-                placed_xy.append((x, y, radius))
-                _, _, top, surface = _surface_point(world, surf_name)
+                cx, cy, top, surface = _surface_point(world, surf_name)
+                px, py = cx + x_off, cy + y_off
+                placed_xy.append((px, py, max(half, 0.05)))
                 world.merge_world_at_pose(
                     sub,
                     HomogeneousTransformationMatrix.from_xyz_quaternion(
-                        x,
-                        y,
+                        px,
+                        py,
                         top + half - min(0.05, 0.5 * half),
                         reference_frame=world.root,
                     ),
@@ -372,34 +395,17 @@ def place_objects_kitchen(world):
                 except Exception:
                     pass
 
-        for cls, name, surf_name, sx, sy, sz in _KITCHEN_PRIMITIVES:
+        for cls, name, surf_name, x_off, y_off, sx, sy, sz in _KITCHEN_PRIMITIVES:
             try:
                 half = sz / 2.0
-                surface_body = world.get_body_by_name(surf_name)
-                rng = random.Random()
-                radius = max(half, 0.05)
-                for _ in range(8):
-                    x, y = _sample_surface_xy(surface_body, rng, margin=0.06)
-                    if _excluded_near_robot(
-                        x, y, _START_POSES.get("kitchen", _DEFAULT_START_POSE)
-                    ):
-                        continue
-                    ok = True
-                    for px, py, pr in placed_xy:
-                        if (x - px) ** 2 + (y - py) ** 2 < (radius + pr) ** 2:
-                            ok = False
-                            break
-                    if ok:
-                        break
-                else:
-                    x, y, _, _ = _surface_point(world, surf_name)
-                placed_xy.append((x, y, radius))
-                _, _, top, surface = _surface_point(world, surf_name)
+                cx, cy, top, surface = _surface_point(world, surf_name)
+                px, py = cx + x_off, cy + y_off
+                placed_xy.append((px, py, max(half, 0.05)))
                 cls.create_with_new_body_in_world(
                     world=world,
                     name=PrefixedName(name),
                     world_root_T_self=HomogeneousTransformationMatrix.from_xyz_rpy(
-                        x=x, y=y, z=top + half - min(0.05, 0.5 * half)
+                        x=px, y=py, z=top + half - min(0.05, 0.5 * half)
                     ),
                     scale=Scale(sx, sy, sz),
                 )
@@ -412,40 +418,66 @@ def place_objects_kitchen(world):
                 except Exception:
                     pass
 
+        for stl, cls, parent, dx, dy, dz in _KITCHEN_IN_DRAWER_STL:
+            try:
+                sub = _stl(stl)
+                _apply_color(sub.root, cls)
+                world.merge_world(
+                    sub,
+                    FixedConnection(
+                        parent=world.get_body_by_name(parent),
+                        child=sub.root,
+                        parent_T_connection_expression=(
+                            HomogeneousTransformationMatrix.from_xyz_rpy(dx, dy, dz)
+                        ),
+                    ),
+                )
+                world.add_semantic_annotation(cls(root=world.get_body_by_name(stl)))
+            except Exception as e:
+                print(f"[world] kitchen in-drawer {stl} skipped: {e}", flush=True)
+
+        for cls, name, parent, dx, dy, dz, sx, sy, sz in _KITCHEN_IN_DRAWER_PRIMITIVE:
+            try:
+                sub = _primitive(name, Scale(sx, sy, sz))
+                _apply_color(sub.root, cls)
+                world.merge_world(
+                    sub,
+                    FixedConnection(
+                        parent=world.get_body_by_name(parent),
+                        child=sub.root,
+                        parent_T_connection_expression=(
+                            HomogeneousTransformationMatrix.from_xyz_rpy(dx, dy, dz)
+                        ),
+                    ),
+                )
+                world.add_semantic_annotation(cls(root=world.get_body_by_name(name)))
+            except Exception as e:
+                print(f"[world] kitchen in-drawer {name} skipped: {e}", flush=True)
+
+    # Validate: no surface-placed object in the excluded-near-robot zone
+    kitchen_start = _START_POSES.get("kitchen", _DEFAULT_START_POSE)
+    for px, py, pr in placed_xy:
+        if _excluded_near_robot(px, py, kitchen_start):
+            print(
+                f"[world] WARNING: kitchen object at ({px:.3f}, {py:.3f}) "
+                f"is within 0.6m of robot start pose",
+                flush=True,
+            )
+
 
 def place_objects_apartment(world):
-    placed_xy = []
     with world.modify_world():
-        for stl, cls, surf_name in _APARTMENT_STL:
+        for stl, cls, surf_name, x_off, y_off in _APARTMENT_STL:
             try:
                 sub = _stl(stl)
                 _apply_color(sub.root, cls)
                 half = sub.root.combined_mesh.extents[2] / 2.0
-                surface_body = world.get_body_by_name(surf_name)
-                rng = random.Random()
-                radius = max(half, 0.05)
-                for _ in range(8):
-                    x, y = _sample_surface_xy(surface_body, rng, margin=0.06)
-                    if _excluded_near_robot(
-                        x, y, _START_POSES.get("apartment", _DEFAULT_START_POSE)
-                    ):
-                        continue
-                    ok = True
-                    for px, py, pr in placed_xy:
-                        if (x - px) ** 2 + (y - py) ** 2 < (radius + pr) ** 2:
-                            ok = False
-                            break
-                    if ok:
-                        break
-                else:
-                    x, y, _, _ = _surface_point(world, surf_name)
-                placed_xy.append((x, y, radius))
-                _, _, top, surface = _surface_point(world, surf_name)
+                cx, cy, top, surface = _surface_point(world, surf_name)
                 world.merge_world_at_pose(
                     sub,
                     HomogeneousTransformationMatrix.from_xyz_quaternion(
-                        x,
-                        y,
+                        cx + x_off,
+                        cy + y_off,
                         top + half - min(0.05, 0.5 * half),
                         reference_frame=world.root,
                     ),
@@ -459,34 +491,15 @@ def place_objects_apartment(world):
                 except Exception:
                     pass
 
-        for cls, name, surf_name, sx, sy, sz in _APARTMENT_PRIMITIVES:
+        for cls, name, surf_name, x_off, y_off, sx, sy, sz in _APARTMENT_PRIMITIVES:
             try:
                 half = sz / 2.0
-                surface_body = world.get_body_by_name(surf_name)
-                rng = random.Random()
-                radius = max(half, 0.05)
-                for _ in range(8):
-                    x, y = _sample_surface_xy(surface_body, rng, margin=0.06)
-                    if _excluded_near_robot(
-                        x, y, _START_POSES.get("apartment", _DEFAULT_START_POSE)
-                    ):
-                        continue
-                    ok = True
-                    for px, py, pr in placed_xy:
-                        if (x - px) ** 2 + (y - py) ** 2 < (radius + pr) ** 2:
-                            ok = False
-                            break
-                    if ok:
-                        break
-                else:
-                    x, y, _, _ = _surface_point(world, surf_name)
-                placed_xy.append((x, y, radius))
-                _, _, top, surface = _surface_point(world, surf_name)
+                cx, cy, top, surface = _surface_point(world, surf_name)
                 cls.create_with_new_body_in_world(
                     world=world,
                     name=PrefixedName(name),
                     world_root_T_self=HomogeneousTransformationMatrix.from_xyz_rpy(
-                        x=x, y=y, z=top + half - min(0.05, 0.5 * half)
+                        x=cx + x_off, y=cy + y_off, z=top + half - min(0.05, 0.5 * half)
                     ),
                     scale=Scale(sx, sy, sz),
                 )

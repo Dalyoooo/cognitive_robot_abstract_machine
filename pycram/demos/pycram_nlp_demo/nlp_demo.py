@@ -229,9 +229,14 @@ def _surface_point(world, surface_name):
     )
     if surface is None:
         raise RuntimeError(f"surface {surface_name!r} is not annotated")
+    # Use the surface origin (body pose) as the deterministic center for X/Y.
+    # Offsets in _KITCHEN_STL / _APARTMENT_STL are relative to center.
+    pose = body.global_pose
+    cx, cy = float(pose.position.x), float(pose.position.y)
+    # Sample a point to get the actual top-face Z (handles table thickness).
     point = surface.sample_points_from_surface()[0]
     p = surface.supporting_surface.global_transform @ point
-    return float(p.x), float(p.y), float(p.z), surface
+    return cx, cy, float(p.z), surface
 
 
 _KITCHEN_STL = [
@@ -374,6 +379,7 @@ def place_objects_kitchen(world):
                 sub = _stl(stl)
                 _apply_color(sub.root, cls)
                 half = sub.root.combined_mesh.extents[2] / 2.0
+                bottom_offset = sub.root.combined_mesh.bounds[0][2]
                 cx, cy, top, surface = _surface_point(world, surf_name)
                 px, py = cx + x_off, cy + y_off
                 placed_xy.append((px, py, max(half, 0.05)))
@@ -382,7 +388,7 @@ def place_objects_kitchen(world):
                     HomogeneousTransformationMatrix.from_xyz_quaternion(
                         px,
                         py,
-                        top + half - min(0.05, 0.5 * half),
+                        top - bottom_offset - min(0.05, 0.5 * half),
                         reference_frame=world.root,
                     ),
                 )
@@ -472,13 +478,14 @@ def place_objects_apartment(world):
                 sub = _stl(stl)
                 _apply_color(sub.root, cls)
                 half = sub.root.combined_mesh.extents[2] / 2.0
+                bottom_offset = sub.root.combined_mesh.bounds[0][2]
                 cx, cy, top, surface = _surface_point(world, surf_name)
                 world.merge_world_at_pose(
                     sub,
                     HomogeneousTransformationMatrix.from_xyz_quaternion(
                         cx + x_off,
                         cy + y_off,
-                        top + half - min(0.05, 0.5 * half),
+                        top - bottom_offset - min(0.05, 0.5 * half),
                         reference_frame=world.root,
                     ),
                 )

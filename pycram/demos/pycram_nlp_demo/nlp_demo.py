@@ -229,14 +229,50 @@ def _surface_point(world, surface_name):
     )
     if surface is None:
         raise RuntimeError(f"surface {surface_name!r} is not annotated")
-    # Use the surface origin (body pose) as the deterministic center for X/Y.
-    # Offsets in _KITCHEN_STL / _APARTMENT_STL are relative to center.
+
+    world_mesh = body.combined_mesh.copy()
+    world_mesh.apply_transform(body.global_transform.to_np())
     pose = body.global_pose
     cx, cy = float(pose.position.x), float(pose.position.y)
-    # Sample a point to get the actual top-face Z (handles table thickness).
-    point = surface.sample_points_from_surface()[0]
-    p = surface.supporting_surface.global_transform @ point
-    return cx, cy, float(p.z), surface
+    top = float(world_mesh.bounds[1][2])
+    return cx, cy, top, surface
+
+
+def _infer_surface_objects(surfaces):
+    """Update semDT surface membership once after all objects were added."""
+    seen = set()
+    for surface in surfaces:
+        if id(surface) in seen:
+            continue
+        seen.add(id(surface))
+        try:
+            surface.infer_objects_on_surface()
+        except Exception as error:
+            print(
+                f"[world] surface membership update skipped: {error}",
+                flush=True,
+            )
+
+
+def _validate_placed_objects(world, body_names):
+    """Reject a demo world that silently lost an expected object."""
+    missing = []
+    for name in body_names:
+        try:
+            body = world.get_body_by_name(name)
+        except Exception:
+            missing.append(name)
+            continue
+        if not any(
+            getattr(annotation, "root", None) is body
+            for annotation in world.semantic_annotations
+        ):
+            missing.append(name)
+    if missing:
+        raise RuntimeError(
+            "Demo world is missing expected annotated objects: "
+            + ", ".join(sorted(missing))
+        )
 
 
 _KITCHEN_STL = [
@@ -373,6 +409,7 @@ def _excluded_near_robot(x, y, start_pose):
 
 def place_objects_kitchen(world):
     placed_xy = []
+    surfaces = []
     with world.modify_world():
         for stl, cls, surf_name, x_off, y_off in _KITCHEN_STL:
             try:
@@ -396,10 +433,7 @@ def place_objects_kitchen(world):
             except Exception as e:
                 print(f"[world] kitchen object {stl} skipped: {e}", flush=True)
             else:
-                try:
-                    surface.infer_objects_on_surface()
-                except Exception:
-                    pass
+                surfaces.append(surface)
 
         for cls, name, surf_name, x_off, y_off, sx, sy, sz in _KITCHEN_PRIMITIVES:
             try:
@@ -419,10 +453,7 @@ def place_objects_kitchen(world):
             except Exception as e:
                 print(f"[world] kitchen primitive {name} skipped: {e}", flush=True)
             else:
-                try:
-                    surface.infer_objects_on_surface()
-                except Exception:
-                    pass
+                surfaces.append(surface)
 
         for stl, cls, parent, dx, dy, dz in _KITCHEN_IN_DRAWER_STL:
             try:
@@ -460,6 +491,16 @@ def place_objects_kitchen(world):
             except Exception as e:
                 print(f"[world] kitchen in-drawer {name} skipped: {e}", flush=True)
 
+        _infer_surface_objects(surfaces)
+
+    expected_names = (
+        [entry[0] for entry in _KITCHEN_STL]
+        + [entry[1] for entry in _KITCHEN_PRIMITIVES]
+        + [entry[0] for entry in _KITCHEN_IN_DRAWER_STL]
+        + [entry[1] for entry in _KITCHEN_IN_DRAWER_PRIMITIVE]
+    )
+    _validate_placed_objects(world, expected_names)
+
     # Validate: no surface-placed object in the excluded-near-robot zone
     kitchen_start = _START_POSES.get("kitchen", _DEFAULT_START_POSE)
     for px, py, pr in placed_xy:
@@ -472,6 +513,7 @@ def place_objects_kitchen(world):
 
 
 def place_objects_apartment(world):
+    surfaces = []
     with world.modify_world():
         for stl, cls, surf_name, x_off, y_off in _APARTMENT_STL:
             try:
@@ -493,10 +535,7 @@ def place_objects_apartment(world):
             except Exception as e:
                 print(f"[world] apartment object {stl} skipped: {e}", flush=True)
             else:
-                try:
-                    surface.infer_objects_on_surface()
-                except Exception:
-                    pass
+                surfaces.append(surface)
 
         for cls, name, surf_name, x_off, y_off, sx, sy, sz in _APARTMENT_PRIMITIVES:
             try:
@@ -514,10 +553,7 @@ def place_objects_apartment(world):
             except Exception as e:
                 print(f"[world] apartment primitive {name} skipped: {e}", flush=True)
             else:
-                try:
-                    surface.infer_objects_on_surface()
-                except Exception:
-                    pass
+                surfaces.append(surface)
 
         for stl, cls, parent, dx, dy, dz in _APARTMENT_IN_DRAWER_STL:
             try:
@@ -554,6 +590,16 @@ def place_objects_apartment(world):
                 world.add_semantic_annotation(cls(root=world.get_body_by_name(name)))
             except Exception as e:
                 print(f"[world] apartment in-drawer {name} skipped: {e}", flush=True)
+
+        _infer_surface_objects(surfaces)
+
+    expected_names = (
+        [entry[0] for entry in _APARTMENT_STL]
+        + [entry[1] for entry in _APARTMENT_PRIMITIVES]
+        + [entry[0] for entry in _APARTMENT_IN_DRAWER_STL]
+        + [entry[1] for entry in _APARTMENT_IN_DRAWER_PRIMITIVE]
+    )
+    _validate_placed_objects(world, expected_names)
 
 
 def build_world(robot_name="pr2", environment="apartment"):

@@ -278,25 +278,22 @@ def _validate_placed_objects(world, body_names):
 _KITCHEN_STL = [
     ("bowl.stl", Bowl, "kitchen_island_surface", 0.0, -0.10),
     ("jeroen_cup.stl", Mug, "kitchen_island_surface", 0.20, -0.10),
-    ("breakfast_cereal.stl", Cereal, "oven_area_area", 0.0, 0.0),
-    ("milk.stl", Milk, "fridge_area", -0.15, -0.10),
+    ("breakfast_cereal.stl", Cereal, "table_area_main", 0.15, -0.15),
     ("Static_CokeBottle.stl", Bottle, "sink_area_surface", -0.15, 0.0),
 ]
 _KITCHEN_PRIMITIVES = [
     (Plate, "plate", "table_area_main", -0.15, -0.10, 0.18, 0.18, 0.02),
     (Apple, "apple", "kitchen_island_surface", -0.20, 0.10, 0.08, 0.08, 0.08),
-    (MustardBottle, "mustard_bottle", "fridge_area", 0.15, -0.10, 0.06, 0.06, 0.18),
     (WineBottle, "wine_bottle", "table_area_main", -0.15, 0.15, 0.07, 0.07, 0.25),
     (SoapBottle, "soap_bottle", "sink_area_surface", 0.15, 0.0, 0.06, 0.08, 0.15),
     (Kettle, "kettle", "table_area_main", 0.20, 0.15, 0.12, 0.12, 0.18),
     (CheezeIt, "cheezeit", "kitchen_island_surface", 0.20, 0.10, 0.06, 0.06, 0.12),
-    (Pringles, "pringles", "fridge_area", -0.15, 0.10, 0.07, 0.07, 0.20),
-    (GelatinBox, "gelatinbox", "fridge_area", 0.15, 0.10, 0.06, 0.06, 0.08),
 ]
-_KITCHEN_IN_DRAWER_STL = [
+_KITCHEN_CONTAINED_STL = [
     ("spoon.stl", Spoon, "kitchen_island_left_upper_drawer_main", -0.05, 0.0, 0.0),
+    ("milk.stl", Milk, "iai_fridge_main", -0.10, -0.05, 0.15),
 ]
-_KITCHEN_IN_DRAWER_PRIMITIVE = [
+_KITCHEN_CONTAINED_PRIMITIVE = [
     (
         Fork,
         "fork",
@@ -341,7 +338,50 @@ _KITCHEN_IN_DRAWER_PRIMITIVE = [
         0.05,
         0.12,
     ),
-    (TomatoSoup, "tomatosoup", "iai_fridge_main", 0.05, 0.0, 0.05, 0.06, 0.06, 0.10),
+    (
+        MustardBottle,
+        "mustard_bottle",
+        "iai_fridge_main",
+        0.10,
+        -0.05,
+        0.15,
+        0.06,
+        0.06,
+        0.18,
+    ),
+    (
+        Pringles,
+        "pringles",
+        "iai_fridge_main",
+        -0.10,
+        0.05,
+        0.0,
+        0.07,
+        0.07,
+        0.20,
+    ),
+    (
+        GelatinBox,
+        "gelatinbox",
+        "iai_fridge_main",
+        0.10,
+        0.05,
+        0.0,
+        0.06,
+        0.06,
+        0.08,
+    ),
+    (
+        TomatoSoup,
+        "tomatosoup",
+        "iai_fridge_main",
+        0.0,
+        0.0,
+        -0.10,
+        0.06,
+        0.06,
+        0.10,
+    ),
 ]
 
 _APARTMENT_STL = [
@@ -455,7 +495,7 @@ def place_objects_kitchen(world):
             else:
                 surfaces.append(surface)
 
-        for stl, cls, parent, dx, dy, dz in _KITCHEN_IN_DRAWER_STL:
+        for stl, cls, parent, dx, dy, dz in _KITCHEN_CONTAINED_STL:
             try:
                 sub = _stl(stl)
                 _apply_color(sub.root, cls)
@@ -471,9 +511,22 @@ def place_objects_kitchen(world):
                 )
                 world.add_semantic_annotation(cls(root=world.get_body_by_name(stl)))
             except Exception as e:
-                print(f"[world] kitchen in-drawer {stl} skipped: {e}", flush=True)
+                print(
+                    f"[world] kitchen contained object {stl} skipped: {e}",
+                    flush=True,
+                )
 
-        for cls, name, parent, dx, dy, dz, sx, sy, sz in _KITCHEN_IN_DRAWER_PRIMITIVE:
+        for (
+            cls,
+            name,
+            parent,
+            dx,
+            dy,
+            dz,
+            sx,
+            sy,
+            sz,
+        ) in _KITCHEN_CONTAINED_PRIMITIVE:
             try:
                 sub = _primitive(name, Scale(sx, sy, sz))
                 _apply_color(sub.root, cls)
@@ -489,15 +542,18 @@ def place_objects_kitchen(world):
                 )
                 world.add_semantic_annotation(cls(root=world.get_body_by_name(name)))
             except Exception as e:
-                print(f"[world] kitchen in-drawer {name} skipped: {e}", flush=True)
+                print(
+                    f"[world] kitchen contained object {name} skipped: {e}",
+                    flush=True,
+                )
 
         _infer_surface_objects(surfaces)
 
     expected_names = (
         [entry[0] for entry in _KITCHEN_STL]
         + [entry[1] for entry in _KITCHEN_PRIMITIVES]
-        + [entry[0] for entry in _KITCHEN_IN_DRAWER_STL]
-        + [entry[1] for entry in _KITCHEN_IN_DRAWER_PRIMITIVE]
+        + [entry[0] for entry in _KITCHEN_CONTAINED_STL]
+        + [entry[1] for entry in _KITCHEN_CONTAINED_PRIMITIVE]
     )
     _validate_placed_objects(world, expected_names)
 

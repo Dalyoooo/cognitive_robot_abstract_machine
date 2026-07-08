@@ -144,6 +144,14 @@ def _add_room(world, room_cls, name, cx, cy, w, d):
     world.add_semantic_annotation(room_cls(floor=floor, name=PrefixedName(name)))
 
 
+def _has_annotation(world, root, annotation_cls):
+    return any(
+        isinstance(annotation, annotation_cls)
+        and getattr(annotation, "root", None) == root
+        for annotation in world.semantic_annotations
+    )
+
+
 def annotate_kitchen(world):
     with world.modify_world():
         WorldReasoner(world).reason()
@@ -173,8 +181,11 @@ def annotate_kitchen(world):
             ("sink_area_dish_washer_main", Dishwasher),
         ):
             try:
+                root = world.get_body_by_name(fixture_name)
+                if fixture_cls is Fridge and _has_annotation(world, root, Fridge):
+                    continue
                 world.add_semantic_annotation(
-                    fixture_cls(root=world.get_body_by_name(fixture_name))
+                    fixture_cls(root=root)
                 )
             except Exception as e:
                 print(f"[world] fixture {fixture_name} skipped: {e}", flush=True)

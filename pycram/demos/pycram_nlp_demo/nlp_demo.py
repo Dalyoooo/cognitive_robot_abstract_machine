@@ -275,47 +275,17 @@ def _validate_placed_objects(world, body_names):
         )
 
 
-_KITCHEN_STL = [
-    ("bowl.stl", Bowl, "kitchen_island_surface", 0.0, -0.10),
-    ("jeroen_cup.stl", Mug, "kitchen_island_surface", 0.20, -0.10),
-    ("breakfast_cereal.stl", Cereal, "table_area_main", 0.15, -0.15),
-    ("Static_CokeBottle.stl", Bottle, "sink_area_surface", -0.15, 0.0),
-]
+# The kitchen is the held-out evaluation world: only unseen objects (objects
+# excluded from training) are placed, so the benchmark tests generalization.
+_KITCHEN_STL = []
 _KITCHEN_PRIMITIVES = [
-    (Plate, "plate", "table_area_main", -0.15, -0.10, 0.18, 0.18, 0.02),
-    (Apple, "apple", "kitchen_island_surface", -0.20, 0.10, 0.08, 0.08, 0.08),
     (WineBottle, "wine_bottle", "table_area_main", -0.15, 0.15, 0.07, 0.07, 0.25),
     (SoapBottle, "soap_bottle", "sink_area_surface", 0.15, 0.0, 0.06, 0.08, 0.15),
     (Kettle, "kettle", "table_area_main", 0.20, 0.15, 0.12, 0.12, 0.18),
     (CheezeIt, "cheezeit", "kitchen_island_surface", 0.20, 0.10, 0.06, 0.06, 0.12),
 ]
-_KITCHEN_CONTAINED_STL = [
-    ("spoon.stl", Spoon, "kitchen_island_left_upper_drawer_main", -0.05, 0.0, 0.0),
-    ("milk.stl", Milk, "iai_fridge_main", -0.10, -0.05, 0.15),
-]
+_KITCHEN_CONTAINED_STL = []
 _KITCHEN_CONTAINED_PRIMITIVE = [
-    (
-        Fork,
-        "fork",
-        "kitchen_island_right_upper_drawer_main",
-        -0.05,
-        0.0,
-        0.0,
-        0.18,
-        0.02,
-        0.02,
-    ),
-    (
-        Knife,
-        "knife",
-        "kitchen_island_middle_upper_drawer_main",
-        -0.05,
-        0.0,
-        0.0,
-        0.18,
-        0.015,
-        0.02,
-    ),
     (
         TunaCan,
         "tunacan",

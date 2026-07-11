@@ -1,5 +1,6 @@
 import os
 import time
+import xml.etree.ElementTree as ET
 from itertools import combinations
 
 from nlp_demo_config import ENVIRONMENTS, OBJECT_COLORS, OBJECTS_DIR
@@ -261,13 +262,9 @@ def _place_surface_objects(world, placements):
             pose = _surface_pose(world, surface, object_world.root, placement.offset)
             world.merge_world_at_pose(object_world, pose)
             body = world.get_body_by_name(placement.name)
-            world.add_semantic_annotation(placement.annotation_type(root=body))
-
-    # semDT updates forward kinematics only after the placement block closes.
-    for surface_name in dict.fromkeys(p.surface for p in placements):
-        surface = _require_surface(world, surface_name)
-        with world.modify_world():
-            surface.infer_objects_on_surface()
+            object_annotation = placement.annotation_type(root=body)
+            world.add_semantic_annotation(object_annotation)
+            surface.add_object(object_annotation)
 
 
 def _place_contained_objects(world, placements):
@@ -458,7 +455,27 @@ def _validate_environment(world, spec):
 
 
 def _build_environment(spec):
-    world = URDFParser.from_file(spec.urdf).parse()
+    urdf_root = ET.parse(spec.urdf).getroot()
+
+    # Keep legacy resource defects local to this demo instead of changing CRAM data.
+    coffee_machine_collision = urdf_root.find(
+        "./link[@name='coffe_machine']/collision"
+    )
+    if coffee_machine_collision is not None:
+        collision_material = coffee_machine_collision.find("material")
+        if collision_material is not None:
+            coffee_machine_collision.remove(collision_material)
+
+    left_drawer_joint = urdf_root.find(
+        "./joint[@name='oven_area_area_left_drawer_main_joint']"
+    )
+    if left_drawer_joint is not None:
+        for duplicate_limit in left_drawer_joint.findall("limit")[1:]:
+            left_drawer_joint.remove(duplicate_limit)
+
+    world = URDFParser(
+        urdf=ET.tostring(urdf_root, encoding="unicode")
+    ).parse()
 
     # Keep household inference isolated from robot links and robot part names.
     WorldReasoner(world).infer_semantic_annotations()

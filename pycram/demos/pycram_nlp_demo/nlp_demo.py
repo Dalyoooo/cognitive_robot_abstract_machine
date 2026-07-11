@@ -1,101 +1,55 @@
 import os
 import time
+from itertools import combinations
 
-import rclpy
+from nlp_demo_config import ENVIRONMENTS, OBJECT_COLORS, OBJECTS_DIR
 from pycram.datastructures.dataclasses import Context
 from semantic_digital_twin.adapters.mesh import STLParser
 from semantic_digital_twin.adapters.urdf import URDFParser
-from semantic_digital_twin.adapters.ros.visualization.viz_marker import (
-    VizMarkerPublisher,
-)
+from semantic_digital_twin.datastructures.prefixed_name import PrefixedName
+from semantic_digital_twin.reasoning.predicates import is_supported_by
 from semantic_digital_twin.reasoning.world_reasoner import WorldReasoner
 from semantic_digital_twin.robots.hsrb import HSRB
-from semantic_digital_twin.robots.justin import Justin
 from semantic_digital_twin.robots.pr2 import PR2
-from semantic_digital_twin.robots.stretch import Stretch
 from semantic_digital_twin.robots.tiago import Tiago
-from semantic_digital_twin.robots.unitree_g1 import UnitreeG1
+from semantic_digital_twin.semantic_annotations.mixins import (
+    HasStorageSpace,
+    HasSupportingSurface,
+)
 from semantic_digital_twin.semantic_annotations.semantic_annotations import (
-    Apple,
-    Bottle,
-    Bowl,
-    Cereal,
-    CheezeIt,
-    CoffeeTable,
-    CounterTop,
-    Cup,
     Dishwasher,
+    Door,
+    Drawer,
     Floor,
-    Fork,
     Fridge,
-    GelatinBox,
-    Kettle,
-    Kitchen,
-    Knife,
-    LivingRoom,
-    Milk,
-    Mug,
-    MustardBottle,
-    Oven,
-    Plate,
-    Pringles,
-    SaltContainer,
-    SideTable,
-    Sink,
-    SoapBottle,
-    Spoon,
-    Table,
-    TomatoSoup,
-    TunaCan,
-    WineBottle,
 )
 from semantic_digital_twin.spatial_types.spatial_types import (
     HomogeneousTransformationMatrix,
     Point3,
 )
+from semantic_digital_twin.world import World
 from semantic_digital_twin.world_description.connections import (
     DifferentialDrive,
     FixedConnection,
     OmniDrive,
 )
-from semantic_digital_twin.datastructures.prefixed_name import PrefixedName
 from semantic_digital_twin.world_description.geometry import Color, Scale
-from semantic_digital_twin.world_description.world_entity import Body
 from semantic_digital_twin.world_description.shape_collection import (
     BoundingBoxCollection,
     ShapeCollection,
 )
-from semantic_digital_twin.world import World
+from semantic_digital_twin.world_description.world_entity import Body
 
-_RESOURCES = os.path.join(os.path.dirname(__file__), "..", "..", "resources")
-_OBJECTS_DIR = os.path.join(_RESOURCES, "objects")
+
+# A tiny overlap avoids numerical gaps while keeping objects visually on the surface.
+_SUPPORT_OVERLAP = 0.005
+_GEOMETRY_TOLERANCE = 1e-4
 
 ROBOTS = {
     "pr2": (PR2, OmniDrive),
     "hsrb": (HSRB, OmniDrive),
-    "stretch": (Stretch, DifferentialDrive),
     "tiago": (Tiago, DifferentialDrive),
 }
-
-ENVIRONMENTS = {
-    "apartment": os.path.join(_RESOURCES, "worlds", "apartment.urdf"),
-    "kitchen": os.path.join(_RESOURCES, "worlds", "kitchen.urdf"),
-}
-
-_START_POSES = {
-    "apartment": (1.5, 2.5, 0),
-    "kitchen": (0.3, 0.8, 0),
-}
-_DEFAULT_START_POSE = (1.5, 2.5, 0)
-
-ROOMS = [
-    (Kitchen, "kitchen", 3.0, 2.5, 6.0, 4.5),
-    (LivingRoom, "living_room", 17.0, 2.5, 3.5, 4.5),
-]
-
-
-def _stl(name):
-    return STLParser(os.path.join(_OBJECTS_DIR, name)).parse()
 
 
 def _primitive(name, scale):
@@ -105,541 +59,449 @@ def _primitive(name, scale):
     ).as_shapes()
     body.collision = shapes
     body.visual = shapes
-    sub = World()
-    with sub.modify_world():
-        sub.add_kinematic_structure_entity(body)
-    return sub
+    subworld = World()
+    with subworld.modify_world():
+        subworld.add_kinematic_structure_entity(body)
+    return subworld
 
 
-def _clear_markers(node, topic="/semworld/viz_marker"):
-    from rclpy.qos import DurabilityPolicy, QoSProfile
-    from visualization_msgs.msg import Marker, MarkerArray
-
-    qos = QoSProfile(depth=10, durability=DurabilityPolicy.TRANSIENT_LOCAL)
-    pub = node.create_publisher(MarkerArray, topic, qos)
-    time.sleep(0.3)
-    marker = Marker()
-    marker.action = Marker.DELETEALL
-    arr = MarkerArray()
-    arr.markers.append(marker)
-    pub.publish(arr)
-    time.sleep(0.2)
+def _object_world(placement):
+    if (placement.mesh is None) == (placement.scale is None):
+        raise ValueError(f"{placement.name!r} must define exactly one of mesh or scale")
+    if placement.mesh is not None:
+        return STLParser(os.path.join(OBJECTS_DIR, placement.mesh)).parse()
+    return _primitive(placement.name, Scale(*placement.scale))
 
 
-def _add_room(world, room_cls, name, cx, cy, w, d):
-    hw, hd = w / 2.0, d / 2.0
-    polytope = [
-        Point3(-hw, -hd, 0.0),
-        Point3(-hw, hd, 0.0),
-        Point3(hw, hd, 0.0),
-        Point3(hw, -hd, 0.0),
-    ]
-    floor = Floor.create_with_new_body_from_polytope_in_world(
-        name=PrefixedName(f"{name}_floor"),
-        world=world,
-        floor_polytope=polytope,
-        world_root_T_self=HomogeneousTransformationMatrix.from_xyz_rpy(cx, cy),
-    )
-    floor.root.collision = ShapeCollection([])
-    world.add_semantic_annotation(room_cls(floor=floor, name=PrefixedName(name)))
-
-
-def _has_annotation(world, root, annotation_cls):
-    return any(
-        isinstance(annotation, annotation_cls)
-        and getattr(annotation, "root", None) == root
-        for annotation in world.semantic_annotations
-    )
-
-
-def annotate_kitchen(world):
-    with world.modify_world():
-        WorldReasoner(world).reason()
-
-        for surf_name in (
-            "kitchen_island_surface",
-            "sink_area_surface",
-        ):
-            try:
-                surface = CounterTop(root=world.get_body_by_name(surf_name))
-                world.add_semantic_annotation(surface)
-                surface.calculate_supporting_surface()
-            except Exception as e:
-                print(f"[world] surface {surf_name} skipped: {e}", flush=True)
-
-        try:
-            table = Table(root=world.get_body_by_name("table_area_main"))
-            world.add_semantic_annotation(table)
-            table.calculate_supporting_surface()
-        except Exception as e:
-            print(f"[world] table table_area_main skipped: {e}", flush=True)
-
-        for fixture_name, fixture_cls in (
-            ("sink_area_sink", Sink),
-            ("oven_area_oven_main", Oven),
-            ("iai_fridge_main", Fridge),
-            ("sink_area_dish_washer_main", Dishwasher),
-        ):
-            try:
-                root = world.get_body_by_name(fixture_name)
-                if fixture_cls is Fridge and _has_annotation(world, root, Fridge):
-                    continue
-                world.add_semantic_annotation(
-                    fixture_cls(root=root)
-                )
-            except Exception as e:
-                print(f"[world] fixture {fixture_name} skipped: {e}", flush=True)
-
-        _add_room(world, Kitchen, "kitchen", -1.0, 0.56, 5.6, 4.9)
-
-
-def annotate_apartment(world):
-    with world.modify_world():
-        WorldReasoner(world).reason()
-
-        for surf_name, surf_cls in (
-            ("island_countertop", CounterTop),
-            ("countertop", CounterTop),
-            ("table_area_main", Table),
-            ("coffee_table", CoffeeTable),
-            ("bedside_table", SideTable),
-        ):
-            try:
-                surface = surf_cls(root=world.get_body_by_name(surf_name))
-                world.add_semantic_annotation(surface)
-                surface.calculate_supporting_surface()
-            except Exception as e:
-                print(f"[world] surface {surf_name} skipped: {e}", flush=True)
-
-        for fixture_name, fixture_cls in (
-            ("sink", Sink),
-            ("oven", Oven),
-            ("cabinet7", Dishwasher),
-        ):
-            try:
-                world.add_semantic_annotation(
-                    fixture_cls(root=world.get_body_by_name(fixture_name))
-                )
-            except Exception as e:
-                print(f"[world] fixture {fixture_name} skipped: {e}", flush=True)
-
-        for room_cls, room_name, cx, cy, w, d in ROOMS:
-            _add_room(world, room_cls, room_name, cx, cy, w, d)
-
-
-def _surface_point(world, surface_name):
-    body = world.get_body_by_name(surface_name)
-    surface = next(
-        (
-            a
-            for a in world.semantic_annotations
-            if getattr(a, "root", None) is body
-            and hasattr(a, "sample_points_from_surface")
-        ),
-        None,
-    )
-    if surface is None:
-        raise RuntimeError(f"surface {surface_name!r} is not annotated")
-
-    world_mesh = body.combined_mesh.copy()
-    world_mesh.apply_transform(body.global_transform.to_np())
-    pose = body.global_pose
-    cx, cy = float(pose.position.x), float(pose.position.y)
-    top = float(world_mesh.bounds[1][2])
-    return cx, cy, top, surface
-
-
-def _infer_surface_objects(surfaces):
-    """Update semDT surface membership once after all objects were added."""
-    seen = set()
-    for surface in surfaces:
-        if id(surface) in seen:
-            continue
-        seen.add(id(surface))
-        try:
-            surface.infer_objects_on_surface()
-        except Exception as error:
-            print(
-                f"[world] surface membership update skipped: {error}",
-                flush=True,
-            )
-
-
-def _validate_placed_objects(world, body_names):
-    """Reject a demo world that silently lost an expected object."""
-    missing = []
-    for name in body_names:
-        try:
-            body = world.get_body_by_name(name)
-        except Exception:
-            missing.append(name)
-            continue
-        if not any(
-            getattr(annotation, "root", None) is body
-            for annotation in world.semantic_annotations
-        ):
-            missing.append(name)
-    if missing:
-        raise RuntimeError(
-            "Demo world is missing expected annotated objects: "
-            + ", ".join(sorted(missing))
-        )
-
-
-# The kitchen is the held-out evaluation world: only unseen objects (objects
-# excluded from training) are placed, so the benchmark tests generalization.
-_KITCHEN_STL = []
-_KITCHEN_PRIMITIVES = [
-    (WineBottle, "wine_bottle", "table_area_main", -0.15, 0.15, 0.07, 0.07, 0.25),
-    (SoapBottle, "soap_bottle", "sink_area_surface", 0.15, 0.0, 0.06, 0.08, 0.15),
-    (Kettle, "kettle", "table_area_main", 0.20, 0.15, 0.12, 0.12, 0.18),
-    (CheezeIt, "cheezeit", "kitchen_island_surface", 0.20, 0.10, 0.06, 0.06, 0.12),
-]
-_KITCHEN_CONTAINED_STL = []
-_KITCHEN_CONTAINED_PRIMITIVE = [
-    (
-        TunaCan,
-        "tunacan",
-        "sink_area_left_upper_drawer_main",
-        0.0,
-        0.0,
-        0.0,
-        0.06,
-        0.06,
-        0.08,
-    ),
-    (
-        SaltContainer,
-        "saltcontainer",
-        "sink_area_left_middle_drawer_main",
-        0.0,
-        0.0,
-        0.0,
-        0.05,
-        0.05,
-        0.12,
-    ),
-    (
-        MustardBottle,
-        "mustard_bottle",
-        "iai_fridge_main",
-        0.10,
-        -0.05,
-        0.15,
-        0.06,
-        0.06,
-        0.18,
-    ),
-    (
-        Pringles,
-        "pringles",
-        "iai_fridge_main",
-        -0.10,
-        0.05,
-        0.0,
-        0.07,
-        0.07,
-        0.20,
-    ),
-    (
-        GelatinBox,
-        "gelatinbox",
-        "iai_fridge_main",
-        0.10,
-        0.05,
-        0.0,
-        0.06,
-        0.06,
-        0.08,
-    ),
-    (
-        TomatoSoup,
-        "tomatosoup",
-        "iai_fridge_main",
-        0.0,
-        0.0,
-        -0.10,
-        0.06,
-        0.06,
-        0.10,
-    ),
-]
-
-_APARTMENT_STL = [
-    ("bowl.stl", Bowl, "island_countertop", -0.20, -0.10),
-    ("breakfast_cereal.stl", Cereal, "island_countertop", 0.20, -0.10),
-    ("milk.stl", Milk, "island_countertop", -0.20, 0.10),
-    ("Static_CokeBottle.stl", Bottle, "countertop", 0.0, 0.0),
-    ("jeroen_cup.stl", Mug, "table_area_main", 0.0, 0.0),
-]
-_APARTMENT_PRIMITIVES = [
-    (Plate, "plate", "table_area_main", -0.15, -0.10, 0.18, 0.18, 0.02),
-    (Plate, "plate_counter", "countertop", 0.15, -0.10, 0.18, 0.18, 0.02),
-    (Apple, "apple", "table_area_main", -0.15, 0.10, 0.08, 0.08, 0.08),
-    (Apple, "apple_island", "island_countertop", 0.15, 0.10, 0.08, 0.08, 0.08),
-]
-_APARTMENT_IN_DRAWER_STL = [
-    ("spoon.stl", Spoon, "cabinet10_drawer_top", -0.05, -0.10, 0.0),
-]
-_APARTMENT_IN_DRAWER_PRIMITIVE = [
-    (Fork, "fork", "cabinet10_drawer_top", -0.05, 0.0, 0.0, 0.18, 0.02, 0.02),
-    (Knife, "knife", "cabinet10_drawer_top", -0.05, 0.10, 0.0, 0.18, 0.015, 0.02),
-    (Mug, "mug_sink", "sink", 0.0, 0.0, 0.0, 0.08, 0.08, 0.10),
-]
-
-
-_OBJECT_COLORS = {
-    "Bowl": (0.20, 0.40, 0.80),
-    "Mug": (0.80, 0.20, 0.20),
-    "Cereal": (0.80, 0.70, 0.20),
-    "Milk": (0.92, 0.92, 0.92),
-    "Spoon": (0.75, 0.75, 0.78),
-    "Bottle": (0.70, 0.10, 0.10),
-    "Plate": (0.92, 0.92, 0.92),
-    "Apple": (0.80, 0.15, 0.15),
-    "Fork": (0.75, 0.75, 0.78),
-    "Knife": (0.75, 0.75, 0.78),
-    "MustardBottle": (0.85, 0.72, 0.10),
-    "WineBottle": (0.45, 0.10, 0.12),
-    "SoapBottle": (0.20, 0.70, 0.30),
-    "Kettle": (0.20, 0.20, 0.22),
-    "TunaCan": (0.70, 0.50, 0.30),
-    "CheezeIt": (0.90, 0.60, 0.05),
-    "Pringles": (0.90, 0.10, 0.10),
-    "GelatinBox": (0.60, 0.30, 0.70),
-    "TomatoSoup": (0.80, 0.10, 0.10),
-    "SaltContainer": (0.85, 0.85, 0.85),
-}
-
-
-def _apply_color(body, cls):
-    """Set visual shape colours from the per-class colour map."""
-    rgb = _OBJECT_COLORS.get(cls.__name__)
+def _apply_color(body, annotation_type):
+    rgb = OBJECT_COLORS.get(annotation_type.__name__)
     if rgb is None:
         return
-    color = Color(rgb[0], rgb[1], rgb[2], 1.0)
+    color = Color(*rgb, 1.0)
     for shape in getattr(body.visual, "shapes", []):
         shape.color = color
 
 
-def _excluded_near_robot(x, y, start_pose):
-    """Return True if (x, y) is within 0.6 m of the robot start pose."""
-    sx, sy, _ = start_pose
-    return (x - sx) ** 2 + (y - sy) ** 2 < 0.36
+def _annotations_on(world, body, annotation_type):
+    return [
+        annotation
+        for annotation in world.semantic_annotations
+        if isinstance(annotation, annotation_type)
+        and getattr(annotation, "root", None) is body
+    ]
 
 
-def place_objects_kitchen(world):
-    placed_xy = []
-    surfaces = []
+def _require_annotation(world, body_name, annotation_type):
+    body = world.get_body_by_name(body_name)
+    matches = _annotations_on(world, body, annotation_type)
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"Expected exactly one {annotation_type.__name__} annotation on "
+            f"{body_name!r}, found {len(matches)}"
+        )
+    return matches[0]
+
+
+def _require_surface(world, body_name):
+    body = world.get_body_by_name(body_name)
+    matches = [
+        annotation
+        for annotation in world.semantic_annotations
+        if isinstance(annotation, HasSupportingSurface)
+        and getattr(annotation, "root", None) is body
+        and annotation.supporting_surface is not None
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"Expected exactly one usable surface annotation on {body_name!r}, "
+            f"found {len(matches)}"
+        )
+    return matches[0]
+
+
+def _ensure_surface(world, spec):
+    body = world.get_body_by_name(spec.name)
+    matches = [
+        annotation
+        for annotation in world.semantic_annotations
+        if type(annotation) is spec.annotation_type
+        and getattr(annotation, "root", None) is body
+    ]
+    if len(matches) > 1:
+        raise RuntimeError(
+            f"Multiple {spec.annotation_type.__name__} annotations on {spec.name!r}"
+        )
+
     with world.modify_world():
-        for stl, cls, surf_name, x_off, y_off in _KITCHEN_STL:
-            try:
-                sub = _stl(stl)
-                _apply_color(sub.root, cls)
-                half = sub.root.combined_mesh.extents[2] / 2.0
-                bottom_offset = sub.root.combined_mesh.bounds[0][2]
-                cx, cy, top, surface = _surface_point(world, surf_name)
-                px, py = cx + x_off, cy + y_off
-                placed_xy.append((px, py, max(half, 0.05)))
-                world.merge_world_at_pose(
-                    sub,
-                    HomogeneousTransformationMatrix.from_xyz_quaternion(
-                        px,
-                        py,
-                        top - bottom_offset - min(0.05, 0.5 * half),
-                        reference_frame=world.root,
-                    ),
+        surface = matches[0] if matches else spec.annotation_type(root=body)
+        if not matches:
+            world.add_semantic_annotation(surface)
+        if surface.supporting_surface is None:
+            supporting_region = surface.calculate_supporting_surface()
+            if supporting_region is None:
+                raise RuntimeError(
+                    f"Could not calculate a supporting surface for {spec.name!r}"
                 )
-                world.add_semantic_annotation(cls(root=world.get_body_by_name(stl)))
-            except Exception as e:
-                print(f"[world] kitchen object {stl} skipped: {e}", flush=True)
-            else:
-                surfaces.append(surface)
+    return surface
 
-        for cls, name, surf_name, x_off, y_off, sx, sy, sz in _KITCHEN_PRIMITIVES:
-            try:
-                half = sz / 2.0
-                cx, cy, top, surface = _surface_point(world, surf_name)
-                px, py = cx + x_off, cy + y_off
-                placed_xy.append((px, py, max(half, 0.05)))
-                cls.create_with_new_body_in_world(
-                    world=world,
-                    name=PrefixedName(name),
-                    world_root_T_self=HomogeneousTransformationMatrix.from_xyz_rpy(
-                        x=px, y=py, z=top + half - min(0.05, 0.5 * half)
-                    ),
-                    scale=Scale(sx, sy, sz),
-                )
-                _apply_color(world.get_body_by_name(name), cls)
-            except Exception as e:
-                print(f"[world] kitchen primitive {name} skipped: {e}", flush=True)
-            else:
-                surfaces.append(surface)
 
-        for stl, cls, parent, dx, dy, dz in _KITCHEN_CONTAINED_STL:
-            try:
-                sub = _stl(stl)
-                _apply_color(sub.root, cls)
-                world.merge_world(
-                    sub,
-                    FixedConnection(
-                        parent=world.get_body_by_name(parent),
-                        child=sub.root,
-                        parent_T_connection_expression=(
-                            HomogeneousTransformationMatrix.from_xyz_rpy(dx, dy, dz)
-                        ),
-                    ),
-                )
-                world.add_semantic_annotation(cls(root=world.get_body_by_name(stl)))
-            except Exception as e:
-                print(
-                    f"[world] kitchen contained object {stl} skipped: {e}",
-                    flush=True,
-                )
+def _branch_annotations(world, root, annotation_type):
+    branch = set(world.get_kinematic_structure_entities_of_branch(root))
+    return [
+        annotation
+        for annotation in world.semantic_annotations
+        if isinstance(annotation, annotation_type)
+        and getattr(annotation, "root", None) in branch
+    ]
 
-        for (
-            cls,
-            name,
-            parent,
-            dx,
-            dy,
-            dz,
-            sx,
-            sy,
-            sz,
-        ) in _KITCHEN_CONTAINED_PRIMITIVE:
-            try:
-                sub = _primitive(name, Scale(sx, sy, sz))
-                _apply_color(sub.root, cls)
-                world.merge_world(
-                    sub,
-                    FixedConnection(
-                        parent=world.get_body_by_name(parent),
-                        child=sub.root,
-                        parent_T_connection_expression=(
-                            HomogeneousTransformationMatrix.from_xyz_rpy(dx, dy, dz)
-                        ),
-                    ),
-                )
-                world.add_semantic_annotation(cls(root=world.get_body_by_name(name)))
-            except Exception as e:
-                print(
-                    f"[world] kitchen contained object {name} skipped: {e}",
-                    flush=True,
-                )
 
-        _infer_surface_objects(surfaces)
+def _ensure_fixture(world, spec):
+    body = world.get_body_by_name(spec.name)
+    matches = [
+        annotation
+        for annotation in world.semantic_annotations
+        if type(annotation) is spec.annotation_type
+        and getattr(annotation, "root", None) is body
+    ]
+    if len(matches) > 1:
+        raise RuntimeError(
+            f"Multiple {spec.annotation_type.__name__} annotations on {spec.name!r}"
+        )
+    if matches:
+        fixture = matches[0]
+    elif spec.annotation_type is Fridge:
+        raise RuntimeError(
+            f"WorldReasoner did not infer the articulated fridge {spec.name!r}"
+        )
+    elif spec.annotation_type is Dishwasher:
+        fixture = Dishwasher(
+            root=body,
+            doors=_branch_annotations(world, body, Door),
+            drawers=_branch_annotations(world, body, Drawer),
+        )
+        if not fixture.doors:
+            raise RuntimeError(
+                f"WorldReasoner did not infer a door for dishwasher {spec.name!r}"
+            )
+        with world.modify_world():
+            world.add_semantic_annotation_recursively(fixture)
+    else:
+        fixture = spec.annotation_type(root=body)
+        with world.modify_world():
+            world.add_semantic_annotation(fixture)
 
-    expected_names = (
-        [entry[0] for entry in _KITCHEN_STL]
-        + [entry[1] for entry in _KITCHEN_PRIMITIVES]
-        + [entry[0] for entry in _KITCHEN_CONTAINED_STL]
-        + [entry[1] for entry in _KITCHEN_CONTAINED_PRIMITIVE]
+    if isinstance(fixture, (Dishwasher, Fridge)) and not fixture.doors:
+        raise RuntimeError(
+            f"{type(fixture).__name__} {spec.name!r} has no inferred door"
+        )
+    return fixture
+
+
+def _add_room(world, spec):
+    width, depth = spec.size
+    half_width, half_depth = width / 2.0, depth / 2.0
+    floor_polytope = [
+        Point3(-half_width, -half_depth, 0.0),
+        Point3(-half_width, half_depth, 0.0),
+        Point3(half_width, half_depth, 0.0),
+        Point3(half_width, -half_depth, 0.0),
+    ]
+    with world.modify_world():
+        floor = Floor.create_with_new_body_from_polytope_in_world(
+            name=PrefixedName(f"{spec.name}_floor"),
+            world=world,
+            floor_polytope=floor_polytope,
+            world_root_T_self=HomogeneousTransformationMatrix.from_xyz_rpy(
+                *spec.center
+            ),
+        )
+        # The room floor is semantic only; the URDF already has collision floors.
+        floor.root.collision = ShapeCollection([])
+        world.add_semantic_annotation(
+            spec.annotation_type(floor=floor, name=PrefixedName(spec.name))
+        )
+
+
+def _surface_pose(world, surface, object_body, offset):
+    region = surface.supporting_surface
+    if region is None or region.combined_mesh is None:
+        raise RuntimeError(f"Surface {surface.root.name!s} has no supporting region")
+    if surface.root.combined_mesh is None:
+        raise RuntimeError(f"Surface {surface.root.name!s} has no geometry")
+    if object_body.combined_mesh is None:
+        raise RuntimeError(f"Object {object_body.name!s} has no geometry")
+
+    # Use collision bounds because URDF geometry can be offset from its link frame.
+    lower, upper = surface.root.combined_mesh.bounds
+    object_lower = object_body.combined_mesh.bounds[0]
+    local_point = Point3(
+        x=float((lower[0] + upper[0]) / 2.0 + offset[0]),
+        y=float((lower[1] + upper[1]) / 2.0 + offset[1]),
+        z=float(upper[2] - object_lower[2] - _SUPPORT_OVERLAP),
+        reference_frame=surface.root,
     )
-    _validate_placed_objects(world, expected_names)
+    world_point = world.transform(local_point, world.root)
+    return HomogeneousTransformationMatrix.from_xyz_rpy(
+        x=float(world_point.x),
+        y=float(world_point.y),
+        z=float(world_point.z),
+        reference_frame=world.root,
+    )
 
-    # Validate: no surface-placed object in the excluded-near-robot zone
-    kitchen_start = _START_POSES.get("kitchen", _DEFAULT_START_POSE)
-    for px, py, pr in placed_xy:
-        if _excluded_near_robot(px, py, kitchen_start):
-            print(
-                f"[world] WARNING: kitchen object at ({px:.3f}, {py:.3f}) "
-                f"is within 0.6m of robot start pose",
-                flush=True,
+
+def _place_surface_objects(world, placements):
+    if not placements:
+        return
+
+    with world.modify_world():
+        for placement in placements:
+            surface = _require_surface(world, placement.surface)
+            object_world = _object_world(placement)
+            _apply_color(object_world.root, placement.annotation_type)
+            pose = _surface_pose(world, surface, object_world.root, placement.offset)
+            world.merge_world_at_pose(object_world, pose)
+            body = world.get_body_by_name(placement.name)
+            world.add_semantic_annotation(placement.annotation_type(root=body))
+
+    # semDT updates forward kinematics only after the placement block closes.
+    for surface_name in dict.fromkeys(p.surface for p in placements):
+        surface = _require_surface(world, surface_name)
+        with world.modify_world():
+            surface.infer_objects_on_surface()
+
+
+def _place_contained_objects(world, placements):
+    if not placements:
+        return
+
+    with world.modify_world():
+        for placement in placements:
+            object_world = _object_world(placement)
+            _apply_color(object_world.root, placement.annotation_type)
+            parent = world.get_body_by_name(placement.container)
+            world.merge_world(
+                object_world,
+                FixedConnection(
+                    parent=parent,
+                    child=object_world.root,
+                    parent_T_connection_expression=(
+                        HomogeneousTransformationMatrix.from_xyz_rpy(
+                            *placement.offset, reference_frame=parent
+                        )
+                    ),
+                ),
+            )
+            body = world.get_body_by_name(placement.name)
+            world.add_semantic_annotation(placement.annotation_type(root=body))
+
+    # Storage registration also reparents through semDT's public storage API.
+    for placement in placements:
+        container = _require_annotation(
+            world, placement.container, placement.container_type
+        )
+        if not isinstance(container, HasStorageSpace):
+            continue
+        stored_object = _require_annotation(
+            world, placement.name, placement.annotation_type
+        )
+        with world.modify_world():
+            container.add_object(stored_object)
+
+
+def _body_bounds_in_frame(world, body, frame):
+    if body.combined_mesh is None:
+        raise RuntimeError(f"Body {body.name!s} has no collision geometry")
+    mesh = body.combined_mesh.copy()
+    frame_transform = world.compute_forward_kinematics(root=frame, tip=body)
+    mesh.apply_transform(frame_transform.to_np())
+    return mesh.bounds
+
+
+def _validate_surface_geometry(world, body, surface):
+    object_lower, object_upper = _body_bounds_in_frame(world, body, surface.root)
+    surface_lower, surface_upper = surface.root.combined_mesh.bounds
+    for axis in (0, 1):
+        if (
+            object_lower[axis] < surface_lower[axis] - _GEOMETRY_TOLERANCE
+            or object_upper[axis] > surface_upper[axis] + _GEOMETRY_TOLERANCE
+        ):
+            raise RuntimeError(
+                f"{body.name!s} footprint exceeds surface {surface.root.name!s}"
+            )
+
+    penetration = float(surface_upper[2] - object_lower[2])
+    if not (
+        -_GEOMETRY_TOLERANCE <= penetration <= _SUPPORT_OVERLAP + _GEOMETRY_TOLERANCE
+    ):
+        raise RuntimeError(
+            f"{body.name!s} penetrates {surface.root.name!s} by {penetration:.4f} m"
+        )
+
+
+def _validate_contained_geometry(world, body, container):
+    if container.combined_mesh is None:
+        raise RuntimeError(f"Container {container.name!s} has no collision geometry")
+    object_lower, object_upper = _body_bounds_in_frame(world, body, container)
+    container_lower, container_upper = container.combined_mesh.bounds
+    for axis in range(3):
+        if (
+            object_lower[axis] < container_lower[axis] - _GEOMETRY_TOLERANCE
+            or object_upper[axis] > container_upper[axis] + _GEOMETRY_TOLERANCE
+        ):
+            raise RuntimeError(
+                f"{body.name!s} lies outside the bounds of {container.name!s}"
             )
 
 
-def place_objects_apartment(world):
-    surfaces = []
+def _validate_object_separation(world, spec):
+    placements = (*spec.surface_objects, *spec.contained_objects)
+    bodies = [world.get_body_by_name(placement.name) for placement in placements]
+    bounds = {body: _body_bounds_in_frame(world, body, world.root) for body in bodies}
+    for first, second in combinations(bodies, 2):
+        first_lower, first_upper = bounds[first]
+        second_lower, second_upper = bounds[second]
+        overlap = [
+            min(first_upper[axis], second_upper[axis])
+            - max(first_lower[axis], second_lower[axis])
+            for axis in range(3)
+        ]
+        if all(amount > _GEOMETRY_TOLERANCE for amount in overlap):
+            raise RuntimeError(f"Objects {first.name!s} and {second.name!s} overlap")
+
+
+def _validate_environment(world, spec):
+    world.validate()
+
+    for surface_spec in spec.surfaces:
+        surface = _require_annotation(
+            world, surface_spec.name, surface_spec.annotation_type
+        )
+        if surface.supporting_surface is None:
+            raise RuntimeError(
+                f"Surface {surface_spec.name!r} has no supporting region"
+            )
+
+    for fixture_spec in spec.fixtures:
+        _require_annotation(world, fixture_spec.name, fixture_spec.annotation_type)
+
+    for room_spec in spec.rooms:
+        rooms = [
+            room
+            for room in world.semantic_annotations
+            if isinstance(room, room_spec.annotation_type)
+            and str(room.name) == room_spec.name
+        ]
+        if len(rooms) != 1:
+            raise RuntimeError(
+                f"Expected exactly one {room_spec.annotation_type.__name__} "
+                f"named {room_spec.name!r}, found {len(rooms)}"
+            )
+
+    root_annotations = {}
+    for annotation in world.semantic_annotations:
+        root = getattr(annotation, "root", None)
+        if root is None:
+            continue
+        key = (type(annotation), root)
+        root_annotations[key] = root_annotations.get(key, 0) + 1
+    duplicates = [
+        (annotation_type.__name__, str(root.name))
+        for (annotation_type, root), count in root_annotations.items()
+        if count > 1
+    ]
+    if duplicates:
+        raise RuntimeError(f"Duplicate root annotations: {duplicates}")
+
+    for placement in spec.surface_objects:
+        body = world.get_body_by_name(placement.name)
+        object_annotation = _require_annotation(
+            world, placement.name, placement.annotation_type
+        )
+        surface = _require_surface(world, placement.surface)
+        if not is_supported_by(body, surface.root):
+            raise RuntimeError(
+                f"{placement.name!r} is not supported by {placement.surface!r}"
+            )
+        if object_annotation not in surface.objects:
+            raise RuntimeError(
+                f"{placement.name!r} is missing from {placement.surface!r}.objects"
+            )
+        if body.parent_kinematic_structure_entity is not surface.root:
+            raise RuntimeError(
+                f"{placement.name!r} is not attached to {placement.surface!r}"
+            )
+        _validate_surface_geometry(world, body, surface)
+
+    for placement in spec.contained_objects:
+        body = world.get_body_by_name(placement.name)
+        parent = world.get_body_by_name(placement.container)
+        object_annotation = _require_annotation(
+            world, placement.name, placement.annotation_type
+        )
+        container = _require_annotation(
+            world, placement.container, placement.container_type
+        )
+        if body.parent_kinematic_structure_entity is not parent:
+            raise RuntimeError(
+                f"{placement.name!r} is not attached to {placement.container!r}"
+            )
+        if (
+            isinstance(container, HasStorageSpace)
+            and object_annotation not in container.objects
+        ):
+            raise RuntimeError(
+                f"{placement.name!r} is missing from {placement.container!r}.objects"
+            )
+        _validate_contained_geometry(world, body, parent)
+
+    _validate_object_separation(world, spec)
+
+
+def _build_environment(spec):
+    world = URDFParser.from_file(spec.urdf).parse()
+
+    # Keep household inference isolated from robot links and robot part names.
+    WorldReasoner(world).infer_semantic_annotations()
+
+    for surface_spec in spec.surfaces:
+        _ensure_surface(world, surface_spec)
+    for fixture_spec in spec.fixtures:
+        _ensure_fixture(world, fixture_spec)
+    for room_spec in spec.rooms:
+        _add_room(world, room_spec)
+
+    _place_surface_objects(world, spec.surface_objects)
+    _place_contained_objects(world, spec.contained_objects)
+    _validate_environment(world, spec)
+    return world
+
+
+def _attach_robot(world, robot_name, start_pose):
+    robot_type, drive_type = ROBOTS[robot_name]
+    if robot_name == "pr2":
+        robot_world = URDFParser.from_file(
+            "package://iai_pr2_description/robots/pr2_with_ft2_cableguide.xacro"
+        ).parse()
+    else:
+        robot_world = URDFParser.from_file(robot_type.get_ros_file_path()).parse()
+
     with world.modify_world():
-        for stl, cls, surf_name, x_off, y_off in _APARTMENT_STL:
-            try:
-                sub = _stl(stl)
-                _apply_color(sub.root, cls)
-                half = sub.root.combined_mesh.extents[2] / 2.0
-                bottom_offset = sub.root.combined_mesh.bounds[0][2]
-                cx, cy, top, surface = _surface_point(world, surf_name)
-                world.merge_world_at_pose(
-                    sub,
-                    HomogeneousTransformationMatrix.from_xyz_quaternion(
-                        cx + x_off,
-                        cy + y_off,
-                        top - bottom_offset - min(0.05, 0.5 * half),
-                        reference_frame=world.root,
-                    ),
-                )
-                world.add_semantic_annotation(cls(root=world.get_body_by_name(stl)))
-            except Exception as e:
-                print(f"[world] apartment object {stl} skipped: {e}", flush=True)
-            else:
-                surfaces.append(surface)
+        drive = drive_type.create_with_dofs(
+            parent=world.root,
+            child=robot_world.root,
+            world=world,
+        )
+        world.merge_world(robot_world, drive)
+        drive.origin = HomogeneousTransformationMatrix.from_xyz_rpy(*start_pose)
+        drive.has_hardware_interface = True
 
-        for cls, name, surf_name, x_off, y_off, sx, sy, sz in _APARTMENT_PRIMITIVES:
-            try:
-                half = sz / 2.0
-                cx, cy, top, surface = _surface_point(world, surf_name)
-                cls.create_with_new_body_in_world(
-                    world=world,
-                    name=PrefixedName(name),
-                    world_root_T_self=HomogeneousTransformationMatrix.from_xyz_rpy(
-                        x=cx + x_off, y=cy + y_off, z=top + half - min(0.05, 0.5 * half)
-                    ),
-                    scale=Scale(sx, sy, sz),
-                )
-                _apply_color(world.get_body_by_name(name), cls)
-            except Exception as e:
-                print(f"[world] apartment primitive {name} skipped: {e}", flush=True)
-            else:
-                surfaces.append(surface)
-
-        for stl, cls, parent, dx, dy, dz in _APARTMENT_IN_DRAWER_STL:
-            try:
-                sub = _stl(stl)
-                _apply_color(sub.root, cls)
-                world.merge_world(
-                    sub,
-                    FixedConnection(
-                        parent=world.get_body_by_name(parent),
-                        child=sub.root,
-                        parent_T_connection_expression=HomogeneousTransformationMatrix.from_xyz_rpy(
-                            dx, dy, dz
-                        ),
-                    ),
-                )
-                world.add_semantic_annotation(cls(root=world.get_body_by_name(stl)))
-            except Exception as e:
-                print(f"[world] apartment in-drawer {stl} skipped: {e}", flush=True)
-
-        for cls, name, parent, dx, dy, dz, sx, sy, sz in _APARTMENT_IN_DRAWER_PRIMITIVE:
-            try:
-                sub = _primitive(name, Scale(sx, sy, sz))
-                _apply_color(sub.root, cls)
-                world.merge_world(
-                    sub,
-                    FixedConnection(
-                        parent=world.get_body_by_name(parent),
-                        child=sub.root,
-                        parent_T_connection_expression=HomogeneousTransformationMatrix.from_xyz_rpy(
-                            dx, dy, dz
-                        ),
-                    ),
-                )
-                world.add_semantic_annotation(cls(root=world.get_body_by_name(name)))
-            except Exception as e:
-                print(f"[world] apartment in-drawer {name} skipped: {e}", flush=True)
-
-        _infer_surface_objects(surfaces)
-
-    expected_names = (
-        [entry[0] for entry in _APARTMENT_STL]
-        + [entry[1] for entry in _APARTMENT_PRIMITIVES]
-        + [entry[0] for entry in _APARTMENT_IN_DRAWER_STL]
-        + [entry[1] for entry in _APARTMENT_IN_DRAWER_PRIMITIVE]
-    )
-    _validate_placed_objects(world, expected_names)
+    if not drive.has_hardware_interface:
+        raise RuntimeError(f"Drive for robot {robot_name!r} is not controlled")
+    return robot_type.from_world(world)
 
 
-def build_world(robot_name="pr2", environment="apartment"):
+def build_world_model(robot_name="hsrb", environment="apartment"):
+    """Build and validate the semDT world without starting ROS visualization."""
     if robot_name not in ROBOTS:
         raise ValueError(f"Unknown robot {robot_name!r}; choose from {sorted(ROBOTS)}")
     if environment not in ENVIRONMENTS:
@@ -647,48 +509,56 @@ def build_world(robot_name="pr2", environment="apartment"):
             f"Unknown environment {environment!r}; choose from {sorted(ENVIRONMENTS)}"
         )
 
-    robot_cls, drive_cls = ROBOTS[robot_name]
+    spec = ENVIRONMENTS[environment]
+    world = _build_environment(spec)
+    robot = _attach_robot(world, robot_name, spec.robot_start)
+    world.validate()
 
-    world = URDFParser.from_file(ENVIRONMENTS[environment]).parse()
-    if robot_name == "pr2":
-        robot_world = URDFParser.from_file(
-            "package://iai_pr2_description/robots/pr2_with_ft2_cableguide.xacro"
-        ).parse()
-    else:
-        robot_world = URDFParser.from_file(robot_cls.get_ros_file_path()).parse()
+    context = Context(world=world, robot=robot)
+    context.evaluate_conditions = False
+    return world, robot, context
 
-    with world.modify_world():
-        drive = drive_cls.create_with_dofs(
-            parent=world.root, child=robot_world.root, world=world
-        )
-        world.merge_world(robot_world, drive)
-        drive.origin = HomogeneousTransformationMatrix.from_xyz_rpy(
-            *_START_POSES.get(environment, _DEFAULT_START_POSE)
-        )
 
-    if environment == "kitchen":
-        annotate_kitchen(world)
-        place_objects_kitchen(world)
-    else:
-        annotate_apartment(world)
-        place_objects_apartment(world)
+def _clear_markers(node, topic="/semworld/viz_marker"):
+    from rclpy.qos import DurabilityPolicy, QoSProfile
+    from visualization_msgs.msg import Marker, MarkerArray
+
+    qos = QoSProfile(depth=10, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+    publisher = node.create_publisher(MarkerArray, topic, qos)
+    time.sleep(0.3)
+    marker = Marker()
+    marker.action = Marker.DELETEALL
+    marker_array = MarkerArray()
+    marker_array.markers.append(marker)
+    publisher.publish(marker_array)
+    time.sleep(0.2)
+
+
+def _start_visualization(world):
+    import rclpy
+    from semantic_digital_twin.adapters.ros.visualization.viz_marker import (
+        VizMarkerPublisher,
+    )
 
     try:
         rclpy.init()
     except RuntimeError:
         pass
-
     node = rclpy.create_node("viz_marker")
     _clear_markers(node)
     VizMarkerPublisher(_world=world, node=node).with_tf_publisher()
+    return node
 
-    robot = robot_cls.from_world(world)
-    context = Context(world=world, robot=robot)
 
-    context.evaluate_conditions = False
+def build_world(robot_name="hsrb", environment="apartment", *, visualize=True):
+    """Build the Binder demo and optionally start its ROS visualization node."""
+    world, robot, context = build_world_model(robot_name, environment)
+    node = _start_visualization(world) if visualize else None
     return world, robot, context, node
 
 
 if __name__ == "__main__":
+    import rclpy
+
     world, robot, context, node = build_world()
     rclpy.spin(node)

@@ -1,5 +1,3 @@
-"""Declarative world and placement data for the NLP Binder demo."""
-
 import os
 from dataclasses import dataclass
 
@@ -36,7 +34,6 @@ from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     TunaCan,
     WineBottle,
 )
-
 
 RESOURCES = os.path.join(os.path.dirname(__file__), "..", "..", "resources")
 OBJECTS_DIR = os.path.join(RESOURCES, "objects")

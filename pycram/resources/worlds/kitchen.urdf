@@ -514,9 +514,7 @@
   <!--
     <xacro:if value="simulated"/>
     -->
-  <joint name="sink_area_dish_washer_main_joint" type="revolute">
-    <axis xyz="1 0 0" />
-    <limit effort="300" lower="0" upper="0" velocity="10"/>
+  <joint name="sink_area_dish_washer_main_joint" type="fixed">
     <origin rpy="0 0 0" xyz="0.01 0.1 0.044 "/>
     <parent link="sink_area"/>
     <child link="sink_area_dish_washer_main"/>
@@ -526,8 +524,7 @@
     <parent link="sink_area_dish_washer_main"/>
     <child link="sink_area_dish_washer_door"/>
     <axis xyz="0 0 1"/>
-    <!-- FIXME make closed position stable instead of forbidding opening... -->
-    <limit effort="300" lower="0" upper="0" velocity="10"/>
+    <limit effort="300" lower="0" upper="1.57079632679" velocity="10"/>
   </joint>
   <joint name="sink_area_dish_washer_door_handle_joint" type="fixed">
     <origin rpy="-1.57079632679 0 0" xyz="0.0625 -0.6325 0."/>

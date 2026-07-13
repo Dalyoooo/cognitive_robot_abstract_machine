@@ -236,6 +236,13 @@ APARTMENT_SURFACE_OBJECTS = (
     ),
     SurfacePlacement(
         Mug,
+        "mug_sink",
+        "countertop",
+        (-0.15, 0.10),
+        scale=(0.08, 0.08, 0.10),
+    ),
+    SurfacePlacement(
+        Mug,
         "jeroen_cup.stl",
         "table_area_main",
         (0.0, 0.0),
@@ -295,15 +302,6 @@ APARTMENT_CONTAINED_OBJECTS = (
         Drawer,
         (-0.05, 0.10, 0.0),
         scale=(0.18, 0.015, 0.02),
-    ),
-    # Sink has no HasStorageSpace mixin; the builder keeps a structural attachment.
-    ContainedPlacement(
-        Mug,
-        "mug_sink",
-        "sink",
-        Sink,
-        (0.0, 0.0, 0.0),
-        scale=(0.08, 0.08, 0.10),
     ),
 )
 

@@ -140,6 +140,13 @@ KITCHEN_SURFACE_OBJECTS = (
         (0.20, 0.10),
         scale=(0.06, 0.06, 0.12),
     ),
+    SurfacePlacement(
+        GelatinBox,
+        "gelatinbox_counter",
+        "fridge_area",
+        (0.0, 0.0),
+        scale=(0.06, 0.06, 0.08),
+    ),
 )
 
 KITCHEN_CONTAINED_OBJECTS = (

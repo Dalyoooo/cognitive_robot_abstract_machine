@@ -98,14 +98,13 @@ KITCHEN_SURFACES = (
     SurfaceSpec("oven_area_area", CounterTop),
     SurfaceSpec("kitchen_island_surface", CounterTop),
     SurfaceSpec("sink_area_surface", CounterTop),
-    SurfaceSpec("table_area_main", Table),
+    SurfaceSpec("table_area", Table),
 )
 
 KITCHEN_FIXTURES = (
     FixtureSpec("sink_area_sink", Sink),
     FixtureSpec("oven_area_oven_main", Oven),
     FixtureSpec("iai_fridge_main", Fridge),
-    FixtureSpec("sink_area_dish_washer_main", Dishwasher),
 )
 
 KITCHEN_ROOMS = (RoomSpec(Kitchen, "kitchen", (-1.0, 0.56), (5.6, 4.9)),)
@@ -115,7 +114,7 @@ KITCHEN_SURFACE_OBJECTS = (
     SurfacePlacement(
         WineBottle,
         "wine_bottle",
-        "table_area_main",
+        "table_area",
         (-0.15, 0.15),
         scale=(0.07, 0.07, 0.25),
     ),
@@ -129,7 +128,7 @@ KITCHEN_SURFACE_OBJECTS = (
     SurfacePlacement(
         Kettle,
         "kettle",
-        "table_area_main",
+        "table_area",
         (0.20, 0.15),
         scale=(0.12, 0.12, 0.18),
     ),
@@ -324,7 +323,7 @@ ENVIRONMENTS = {
         contained_objects=APARTMENT_CONTAINED_OBJECTS,
     ),
     "kitchen": EnvironmentSpec(
-        urdf=os.path.join(RESOURCES, "worlds", "kitchen.urdf"),
+        urdf=os.path.join(RESOURCES, "worlds", "kitchen-small.urdf"),
         robot_start=(0.3, 0.8, 0.0),
         surfaces=KITCHEN_SURFACES,
         fixtures=KITCHEN_FIXTURES,

@@ -1,4 +1,3 @@
-import importlib.util
 import sys
 from pathlib import Path
 
@@ -10,24 +9,12 @@ from semantic_digital_twin.semantic_annotations.mixins import (
 )
 
 
-_DEMO_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "pycram"
-    / "demos"
-    / "pycram_nlp_demo"
-    / "nlp_demo.py"
-)
-_MODULE_SPEC = importlib.util.spec_from_file_location(
-    "pycram_nlp_demo_for_tests", _DEMO_PATH
-)
-assert _MODULE_SPEC is not None and _MODULE_SPEC.loader is not None
-nlp_demo = importlib.util.module_from_spec(_MODULE_SPEC)
-sys.modules[_MODULE_SPEC.name] = nlp_demo
-sys.path.insert(0, str(_DEMO_PATH.parent))
+_DEMOS_DIR = Path(__file__).resolve().parents[1] / "pycram" / "demos"
+sys.path.insert(0, str(_DEMOS_DIR))
 try:
-    _MODULE_SPEC.loader.exec_module(nlp_demo)
+    import thesis_demo.nlp_demo as nlp_demo
 finally:
-    sys.path.remove(str(_DEMO_PATH.parent))
+    sys.path.remove(str(_DEMOS_DIR))
 
 
 _EXPECTED_SURFACES = {
@@ -45,7 +32,7 @@ _EXPECTED_SURFACES = {
         ("oven_area_area", "CounterTop"),
         ("kitchen_island_surface", "CounterTop"),
         ("sink_area_surface", "CounterTop"),
-        ("table_area_main", "Table"),
+        ("table_area", "Table"),
     ),
 }
 
@@ -59,7 +46,6 @@ _EXPECTED_FIXTURES = {
         ("sink_area_sink", "Sink"),
         ("oven_area_oven_main", "Oven"),
         ("iai_fridge_main", "Fridge"),
-        ("sink_area_dish_washer_main", "Dishwasher"),
     ),
 }
 
@@ -93,9 +79,9 @@ _EXPECTED_OBJECTS = {
         ("contained_in", "mug_sink", "Mug", "sink"),
     ),
     "kitchen": (
-        ("supported_by", "wine_bottle", "WineBottle", "table_area_main"),
+        ("supported_by", "wine_bottle", "WineBottle", "table_area"),
         ("supported_by", "soap_bottle", "SoapBottle", "sink_area_surface"),
-        ("supported_by", "kettle", "Kettle", "table_area_main"),
+        ("supported_by", "kettle", "Kettle", "table_area"),
         (
             "supported_by",
             "cheezeit",
@@ -188,7 +174,8 @@ def test_environment_configuration_preserves_binder_contract():
     assert tuple(nlp_demo.ENVIRONMENTS) == ("apartment", "kitchen")
 
     for environment_name, spec in nlp_demo.ENVIRONMENTS.items():
-        assert Path(spec.urdf).name == f"{environment_name}.urdf"
+        expected_urdf = {"apartment": "apartment.urdf", "kitchen": "kitchen-small.urdf"}
+        assert Path(spec.urdf).name == expected_urdf[environment_name]
         assert _configured_surfaces(spec) == _EXPECTED_SURFACES[environment_name]
         assert _configured_fixtures(spec) == _EXPECTED_FIXTURES[environment_name]
         assert _configured_rooms(spec) == _EXPECTED_ROOMS[environment_name]

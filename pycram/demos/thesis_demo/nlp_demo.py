@@ -3,7 +3,7 @@ import time
 import xml.etree.ElementTree as ET
 from itertools import combinations
 
-from nlp_demo_config import ENVIRONMENTS, OBJECT_COLORS, OBJECTS_DIR
+from .nlp_demo_config import ENVIRONMENTS, OBJECT_COLORS, OBJECTS_DIR
 from pycram.datastructures.dataclasses import Context
 from semantic_digital_twin.adapters.mesh import STLParser
 from semantic_digital_twin.adapters.urdf import URDFParser
@@ -83,39 +83,21 @@ def _apply_color(body, annotation_type):
         shape.color = color
 
 
-def _annotations_on(world, body, annotation_type):
-    return [
-        annotation
-        for annotation in world.semantic_annotations
-        if isinstance(annotation, annotation_type)
-        and getattr(annotation, "root", None) is body
-    ]
-
-
-def _require_annotation(world, body_name, annotation_type):
-    body = world.get_body_by_name(body_name)
-    matches = _annotations_on(world, body, annotation_type)
-    if len(matches) != 1:
-        raise RuntimeError(
-            f"Expected exactly one {annotation_type.__name__} annotation on "
-            f"{body_name!r}, found {len(matches)}"
-        )
-    return matches[0]
-
-
-def _require_surface(world, body_name):
+def get_annotation(world, body_name, annotation_type, *, usable_surface=False):
+    """Return the single annotation of a type rooted at the named body."""
     body = world.get_body_by_name(body_name)
     matches = [
         annotation
         for annotation in world.semantic_annotations
-        if isinstance(annotation, HasSupportingSurface)
+        if isinstance(annotation, annotation_type)
         and getattr(annotation, "root", None) is body
-        and annotation.supporting_surface is not None
+        and (not usable_surface or annotation.supporting_surface is not None)
     ]
     if len(matches) != 1:
+        qualifier = " usable" if usable_surface else ""
         raise RuntimeError(
-            f"Expected exactly one usable surface annotation on {body_name!r}, "
-            f"found {len(matches)}"
+            f"Expected exactly one{qualifier} {annotation_type.__name__} "
+            f"annotation on {body_name!r}, found {len(matches)}"
         )
     return matches[0]
 
@@ -256,7 +238,9 @@ def _place_surface_objects(world, placements):
 
     with world.modify_world():
         for placement in placements:
-            surface = _require_surface(world, placement.surface)
+            surface = get_annotation(
+                world, placement.surface, HasSupportingSurface, usable_surface=True
+            )
             object_world = _object_world(placement)
             _apply_color(object_world.root, placement.annotation_type)
             pose = _surface_pose(world, surface, object_world.root, placement.offset)
@@ -293,12 +277,12 @@ def _place_contained_objects(world, placements):
 
     # Storage registration also reparents through semDT's public storage API.
     for placement in placements:
-        container = _require_annotation(
+        container = get_annotation(
             world, placement.container, placement.container_type
         )
         if not isinstance(container, HasStorageSpace):
             continue
-        stored_object = _require_annotation(
+        stored_object = get_annotation(
             world, placement.name, placement.annotation_type
         )
         with world.modify_world():
@@ -370,7 +354,7 @@ def _validate_environment(world, spec):
     world.validate()
 
     for surface_spec in spec.surfaces:
-        surface = _require_annotation(
+        surface = get_annotation(
             world, surface_spec.name, surface_spec.annotation_type
         )
         if surface.supporting_surface is None:
@@ -379,7 +363,7 @@ def _validate_environment(world, spec):
             )
 
     for fixture_spec in spec.fixtures:
-        _require_annotation(world, fixture_spec.name, fixture_spec.annotation_type)
+        get_annotation(world, fixture_spec.name, fixture_spec.annotation_type)
 
     for room_spec in spec.rooms:
         rooms = [
@@ -411,10 +395,12 @@ def _validate_environment(world, spec):
 
     for placement in spec.surface_objects:
         body = world.get_body_by_name(placement.name)
-        object_annotation = _require_annotation(
+        object_annotation = get_annotation(
             world, placement.name, placement.annotation_type
         )
-        surface = _require_surface(world, placement.surface)
+        surface = get_annotation(
+            world, placement.surface, HasSupportingSurface, usable_surface=True
+        )
         if not is_supported_by(body, surface.root):
             raise RuntimeError(
                 f"{placement.name!r} is not supported by {placement.surface!r}"
@@ -432,10 +418,10 @@ def _validate_environment(world, spec):
     for placement in spec.contained_objects:
         body = world.get_body_by_name(placement.name)
         parent = world.get_body_by_name(placement.container)
-        object_annotation = _require_annotation(
+        object_annotation = get_annotation(
             world, placement.name, placement.annotation_type
         )
-        container = _require_annotation(
+        container = get_annotation(
             world, placement.container, placement.container_type
         )
         if body.parent_kinematic_structure_entity is not parent:
@@ -457,7 +443,12 @@ def _validate_environment(world, spec):
 def _build_environment(spec):
     urdf_root = ET.parse(spec.urdf).getroot()
 
-    # Keep legacy resource defects local to this demo instead of changing CRAM data.
+    # Work around two upstream URDF defects locally instead of changing CRAM
+    # data (D16); each patch becomes a no-op once upstream fixes the file:
+    # - iai_apartment: the coffe_machine link's collision carries a <material>
+    #   element that breaks mesh coloring for the whole model.
+    # - kitchen/kitchen-small URDFs: oven_area_area_left_drawer_main_joint
+    #   contains a duplicate <limit>, which would freeze the drawer.
     coffee_machine_collision = urdf_root.find(
         "./link[@name='coffe_machine']/collision"
     )
@@ -495,12 +486,7 @@ def _build_environment(spec):
 
 def _attach_robot(world, robot_name, start_pose):
     robot_type, drive_type = ROBOTS[robot_name]
-    if robot_name == "pr2":
-        robot_world = URDFParser.from_file(
-            "package://iai_pr2_description/robots/pr2_with_ft2_cableguide.xacro"
-        ).parse()
-    else:
-        robot_world = URDFParser.from_file(robot_type.get_ros_file_path()).parse()
+    robot_world = URDFParser.from_file(robot_type.get_ros_file_path()).parse()
 
     with world.modify_world():
         drive = drive_type.create_with_dofs(
@@ -536,19 +522,26 @@ def build_world_model(robot_name="hsrb", environment="apartment"):
     return world, robot, context
 
 
-def _clear_markers(node, topic="/semworld/viz_marker"):
+def _clear_markers(node, topic="/semworld/viz_marker", timeout=5.0):
     from rclpy.qos import DurabilityPolicy, QoSProfile
     from visualization_msgs.msg import Marker, MarkerArray
 
     qos = QoSProfile(depth=10, durability=DurabilityPolicy.TRANSIENT_LOCAL)
     publisher = node.create_publisher(MarkerArray, topic, qos)
-    time.sleep(0.3)
+
+    # Deterministic wait instead of fixed sleeps: only clear once a
+    # subscriber (RViz) actually matched. The clear matters only on
+    # environment/robot switches with a long-lived RViz; same-map rebuilds
+    # are covered by marker overwrite, headless runs publish nothing.
+    deadline = time.monotonic() + timeout
+    while publisher.get_subscription_count() == 0 and time.monotonic() < deadline:
+        time.sleep(0.05)
+
     marker = Marker()
     marker.action = Marker.DELETEALL
     marker_array = MarkerArray()
     marker_array.markers.append(marker)
     publisher.publish(marker_array)
-    time.sleep(0.2)
 
 
 def _start_visualization(world):

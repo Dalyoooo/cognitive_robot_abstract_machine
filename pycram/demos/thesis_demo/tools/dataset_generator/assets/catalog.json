@@ -1,0 +1,2552 @@
+{
+  "schema_version": 1,
+  "sources": [
+    "semantic_annotations.py",
+    "mixins.py"
+  ],
+  "types": {
+    "Agent": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "concept-only type",
+      "name": "Agent",
+      "natural_label": "agent",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Agent",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "Aperture": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootRegion",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_region"
+      ],
+      "excluded_reason": "world structure",
+      "name": "Aperture",
+      "natural_label": "aperture",
+      "parents": [
+        "HasRootRegion"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Aperture",
+      "requires_open_close": false,
+      "role": null,
+      "sampleable": false
+    },
+    "Apple": {
+      "aliases": [],
+      "ancestors": [
+        "Fruit",
+        "Produce",
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Apple",
+      "natural_label": "apple",
+      "parents": [
+        "Fruit"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Apple",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Armchair": {
+      "aliases": [],
+      "ancestors": [
+        "Chair",
+        "Furniture",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [],
+      "excluded_reason": null,
+      "name": "Armchair",
+      "natural_label": "armchair",
+      "parents": [
+        "Chair"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Armchair",
+      "requires_open_close": false,
+      "role": "furniture",
+      "sampleable": true
+    },
+    "Banana": {
+      "aliases": [],
+      "ancestors": [
+        "Fruit",
+        "Produce",
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Banana",
+      "natural_label": "banana",
+      "parents": [
+        "Fruit"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Banana",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Baseball": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Baseball",
+      "natural_label": "baseball",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Baseball",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Bathroom": {
+      "aliases": [],
+      "ancestors": [
+        "Room",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [],
+      "excluded_reason": null,
+      "name": "Bathroom",
+      "natural_label": "bathroom",
+      "parents": [
+        "Room"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Bathroom",
+      "requires_open_close": false,
+      "role": "room",
+      "sampleable": true
+    },
+    "Bed": {
+      "aliases": [],
+      "ancestors": [
+        "Furniture",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [],
+      "excluded_reason": null,
+      "name": "Bed",
+      "natural_label": "bed",
+      "parents": [
+        "Furniture"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Bed",
+      "requires_open_close": false,
+      "role": "furniture",
+      "sampleable": true
+    },
+    "Bedroom": {
+      "aliases": [],
+      "ancestors": [
+        "Room",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [],
+      "excluded_reason": null,
+      "name": "Bedroom",
+      "natural_label": "bedroom",
+      "parents": [
+        "Room"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Bedroom",
+      "requires_open_close": false,
+      "role": "room",
+      "sampleable": true
+    },
+    "Book": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Book",
+      "natural_label": "book",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Book",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "BookFront": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "object part",
+      "name": "BookFront",
+      "natural_label": "book front",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.BookFront",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "Bottle": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "concept-only type",
+      "name": "Bottle",
+      "natural_label": "bottle",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Bottle",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "Bowl": {
+      "aliases": [],
+      "ancestors": [
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation",
+        "IsPerceivable"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "perceivable",
+        "root_body",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": null,
+      "name": "Bowl",
+      "natural_label": "bowl",
+      "parents": [
+        "HasSupportingSurface",
+        "IsPerceivable"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Bowl",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Bread": {
+      "aliases": [
+        "bumpybread",
+        "grainbread",
+        "honeybread",
+        "loafbread",
+        "whitebread"
+      ],
+      "ancestors": [
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Bread",
+      "natural_label": "bread",
+      "parents": [
+        "Food"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Bread",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Cabinet": {
+      "aliases": [],
+      "ancestors": [
+        "Furniture",
+        "SemanticAnnotation",
+        "HasCaseAsRootBody",
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "case",
+        "root_body",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": null,
+      "name": "Cabinet",
+      "natural_label": "cabinet",
+      "parents": [
+        "Furniture",
+        "HasCaseAsRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Cabinet",
+      "requires_open_close": false,
+      "role": "surface",
+      "sampleable": true
+    },
+    "Candy": {
+      "aliases": [],
+      "ancestors": [
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation",
+        "IsPerceivable"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "perceivable",
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Candy",
+      "natural_label": "candy",
+      "parents": [
+        "Food",
+        "IsPerceivable"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Candy",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Carrot": {
+      "aliases": [],
+      "ancestors": [
+        "Vegetable",
+        "Produce",
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Carrot",
+      "natural_label": "carrot",
+      "parents": [
+        "Vegetable"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Carrot",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Cereal": {
+      "aliases": [],
+      "ancestors": [
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation",
+        "IsPerceivable"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "perceivable",
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Cereal",
+      "natural_label": "cereal",
+      "parents": [
+        "Food",
+        "IsPerceivable"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Cereal",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Chair": {
+      "aliases": [],
+      "ancestors": [
+        "Furniture",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [],
+      "excluded_reason": "concept-only type",
+      "name": "Chair",
+      "natural_label": "chair",
+      "parents": [
+        "Furniture"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Chair",
+      "requires_open_close": false,
+      "role": "furniture",
+      "sampleable": false
+    },
+    "CheezeIt": {
+      "aliases": [
+        "cheez-it",
+        "crackers"
+      ],
+      "ancestors": [
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "CheezeIt",
+      "natural_label": "cheeze-it",
+      "parents": [
+        "Food"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.CheezeIt",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Cloth": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Cloth",
+      "natural_label": "cloth",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Cloth",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "CoffeeTable": {
+      "aliases": [],
+      "ancestors": [
+        "Table",
+        "Furniture",
+        "SemanticAnnotation",
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "root_body",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": null,
+      "name": "CoffeeTable",
+      "natural_label": "coffee table",
+      "parents": [
+        "Table"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.CoffeeTable",
+      "requires_open_close": false,
+      "role": "surface",
+      "sampleable": true
+    },
+    "CookingContainer": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "concept-only type",
+      "name": "CookingContainer",
+      "natural_label": "cooking container",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.CookingContainer",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "CounterTop": {
+      "aliases": [
+        "counter",
+        "counter top",
+        "worktop"
+      ],
+      "ancestors": [
+        "Furniture",
+        "SemanticAnnotation",
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "root_body",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": null,
+      "name": "CounterTop",
+      "natural_label": "countertop",
+      "parents": [
+        "Furniture",
+        "HasSupportingSurface"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.CounterTop",
+      "requires_open_close": false,
+      "role": "surface",
+      "sampleable": true
+    },
+    "Cup": {
+      "aliases": [],
+      "ancestors": [
+        "DrinkingContainer",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation",
+        "IsPerceivable"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "perceivable",
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Cup",
+      "natural_label": "cup",
+      "parents": [
+        "DrinkingContainer",
+        "IsPerceivable"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Cup",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Cupboard": {
+      "aliases": [],
+      "ancestors": [
+        "Cabinet",
+        "Furniture",
+        "SemanticAnnotation",
+        "HasCaseAsRootBody",
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "HasDoors"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "case",
+        "doors",
+        "openable",
+        "root_body",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": null,
+      "name": "Cupboard",
+      "natural_label": "cupboard",
+      "parents": [
+        "Cabinet",
+        "HasDoors"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Cupboard",
+      "requires_open_close": true,
+      "role": "container",
+      "sampleable": true
+    },
+    "Cuttlery": {
+      "aliases": [
+        "cutlery",
+        "utensils"
+      ],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "concept-only type",
+      "name": "Cuttlery",
+      "natural_label": "cutlery",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Cuttlery",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "Decor": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "concept-only type",
+      "name": "Decor",
+      "natural_label": "decor",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Decor",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "Desk": {
+      "aliases": [],
+      "ancestors": [
+        "Table",
+        "Furniture",
+        "SemanticAnnotation",
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "root_body",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": null,
+      "name": "Desk",
+      "natural_label": "desk",
+      "parents": [
+        "Table"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Desk",
+      "requires_open_close": false,
+      "role": "surface",
+      "sampleable": true
+    },
+    "DiningTable": {
+      "aliases": [],
+      "ancestors": [
+        "Table",
+        "Furniture",
+        "SemanticAnnotation",
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "root_body",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": null,
+      "name": "DiningTable",
+      "natural_label": "dining table",
+      "parents": [
+        "Table"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.DiningTable",
+      "requires_open_close": false,
+      "role": "surface",
+      "sampleable": true
+    },
+    "Dishwasher": {
+      "aliases": [],
+      "ancestors": [
+        "HasCaseAsRootBody",
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation",
+        "HasDoors",
+        "HasDrawers"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "case",
+        "doors",
+        "drawers",
+        "openable",
+        "root_body",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": null,
+      "name": "Dishwasher",
+      "natural_label": "dishwasher",
+      "parents": [
+        "HasCaseAsRootBody",
+        "HasDoors",
+        "HasDrawers"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Dishwasher",
+      "requires_open_close": true,
+      "role": "container",
+      "sampleable": true
+    },
+    "Door": {
+      "aliases": [],
+      "ancestors": [
+        "HasHandle",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation",
+        "HasHinge"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "handle",
+        "hinge",
+        "openable",
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Door",
+      "natural_label": "door",
+      "parents": [
+        "HasHandle",
+        "HasHinge"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Door",
+      "requires_open_close": true,
+      "role": "container",
+      "sampleable": true
+    },
+    "DoorWithType": {
+      "aliases": [],
+      "ancestors": [
+        "Door",
+        "HasHandle",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation",
+        "HasHinge"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "handle",
+        "hinge",
+        "openable",
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "DoorWithType",
+      "natural_label": "door",
+      "parents": [
+        "Door"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.DoorWithType",
+      "requires_open_close": true,
+      "role": "container",
+      "sampleable": true
+    },
+    "DoubleDoor": {
+      "aliases": [],
+      "ancestors": [
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [],
+      "excluded_reason": null,
+      "name": "DoubleDoor",
+      "natural_label": "double door",
+      "parents": [
+        "SemanticAnnotation"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.DoubleDoor",
+      "requires_open_close": false,
+      "role": "container",
+      "sampleable": true
+    },
+    "Drawer": {
+      "aliases": [],
+      "ancestors": [
+        "Furniture",
+        "SemanticAnnotation",
+        "HasCaseAsRootBody",
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "HasHandle",
+        "HasSlider"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "case",
+        "handle",
+        "openable",
+        "root_body",
+        "slider",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": null,
+      "name": "Drawer",
+      "natural_label": "drawer",
+      "parents": [
+        "Furniture",
+        "HasCaseAsRootBody",
+        "HasHandle",
+        "HasSlider",
+        "HasStorageSpace"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Drawer",
+      "requires_open_close": true,
+      "role": "container",
+      "sampleable": true
+    },
+    "Dresser": {
+      "aliases": [],
+      "ancestors": [
+        "Cabinet",
+        "Furniture",
+        "SemanticAnnotation",
+        "HasCaseAsRootBody",
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "HasDrawers",
+        "HasDoors"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "case",
+        "doors",
+        "drawers",
+        "openable",
+        "root_body",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": null,
+      "name": "Dresser",
+      "natural_label": "dresser",
+      "parents": [
+        "Cabinet",
+        "HasDrawers",
+        "HasDoors"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Dresser",
+      "requires_open_close": true,
+      "role": "container",
+      "sampleable": true
+    },
+    "DrinkingContainer": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "concept-only type",
+      "name": "DrinkingContainer",
+      "natural_label": "drinking container",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.DrinkingContainer",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "Drone": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "agent",
+      "name": "Drone",
+      "natural_label": "drone",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Drone",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "EntryWay": {
+      "aliases": [],
+      "ancestors": [
+        "Aperture",
+        "HasRootRegion",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_region"
+      ],
+      "excluded_reason": "world structure",
+      "name": "EntryWay",
+      "natural_label": "entry way",
+      "parents": [
+        "Aperture"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.EntryWay",
+      "requires_open_close": false,
+      "role": null,
+      "sampleable": false
+    },
+    "Floor": {
+      "aliases": [],
+      "ancestors": [
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "root_body",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": "world structure",
+      "name": "Floor",
+      "natural_label": "floor",
+      "parents": [
+        "HasSupportingSurface"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Floor",
+      "requires_open_close": false,
+      "role": "surface",
+      "sampleable": false
+    },
+    "Food": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "concept-only type",
+      "name": "Food",
+      "natural_label": "food",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Food",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "Fork": {
+      "aliases": [],
+      "ancestors": [
+        "Cuttlery",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Fork",
+      "natural_label": "fork",
+      "parents": [
+        "Cuttlery"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Fork",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Fridge": {
+      "aliases": [
+        "refrigerator"
+      ],
+      "ancestors": [
+        "Cabinet",
+        "Furniture",
+        "SemanticAnnotation",
+        "HasCaseAsRootBody",
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "HasDoors",
+        "HasDrawers"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "case",
+        "doors",
+        "drawers",
+        "openable",
+        "root_body",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": null,
+      "name": "Fridge",
+      "natural_label": "fridge",
+      "parents": [
+        "Cabinet",
+        "HasDoors",
+        "HasDrawers"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Fridge",
+      "requires_open_close": true,
+      "role": "container",
+      "sampleable": true
+    },
+    "Fruit": {
+      "aliases": [],
+      "ancestors": [
+        "Produce",
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "concept-only type",
+      "name": "Fruit",
+      "natural_label": "fruit",
+      "parents": [
+        "Produce"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Fruit",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "Furniture": {
+      "aliases": [],
+      "ancestors": [
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [],
+      "excluded_reason": "concept-only type",
+      "name": "Furniture",
+      "natural_label": "furniture",
+      "parents": [
+        "SemanticAnnotation",
+        "ABC"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Furniture",
+      "requires_open_close": false,
+      "role": "furniture",
+      "sampleable": false
+    },
+    "GarbageBin": {
+      "aliases": [
+        "garbage can",
+        "trash bin"
+      ],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "large fixture",
+      "name": "GarbageBin",
+      "natural_label": "garbage bin",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.GarbageBin",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "GelatinBox": {
+      "aliases": [],
+      "ancestors": [
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "GelatinBox",
+      "natural_label": "gelatin box",
+      "parents": [
+        "Food"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.GelatinBox",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Handle": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "object part",
+      "name": "Handle",
+      "natural_label": "handle",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Handle",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "Hinge": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "object part",
+      "name": "Hinge",
+      "natural_label": "hinge",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Hinge",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "Houseplant": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "large decor",
+      "name": "Houseplant",
+      "natural_label": "houseplant",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Houseplant",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "Human": {
+      "aliases": [],
+      "ancestors": [
+        "Agent",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "agent",
+      "name": "Human",
+      "natural_label": "human",
+      "parents": [
+        "Agent"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Human",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "Kettle": {
+      "aliases": [],
+      "ancestors": [
+        "CookingContainer",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Kettle",
+      "natural_label": "kettle",
+      "parents": [
+        "CookingContainer"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Kettle",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Kitchen": {
+      "aliases": [],
+      "ancestors": [
+        "Room",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [],
+      "excluded_reason": null,
+      "name": "Kitchen",
+      "natural_label": "kitchen",
+      "parents": [
+        "Room"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Kitchen",
+      "requires_open_close": false,
+      "role": "room",
+      "sampleable": true
+    },
+    "Knife": {
+      "aliases": [],
+      "ancestors": [
+        "Cuttlery",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Knife",
+      "natural_label": "knife",
+      "parents": [
+        "Cuttlery"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Knife",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Lettuce": {
+      "aliases": [],
+      "ancestors": [
+        "Vegetable",
+        "Produce",
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Lettuce",
+      "natural_label": "lettuce",
+      "parents": [
+        "Vegetable"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Lettuce",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Lid": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "concept-only type",
+      "name": "Lid",
+      "natural_label": "lid",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Lid",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "LiquidCap": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "LiquidCap",
+      "natural_label": "liquid cap",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.LiquidCap",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "LivingRoom": {
+      "aliases": [],
+      "ancestors": [
+        "Room",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [],
+      "excluded_reason": null,
+      "name": "LivingRoom",
+      "natural_label": "living room",
+      "parents": [
+        "Room"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.LivingRoom",
+      "requires_open_close": false,
+      "role": "room",
+      "sampleable": true
+    },
+    "Milk": {
+      "aliases": [],
+      "ancestors": [
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation",
+        "IsPerceivable"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "perceivable",
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Milk",
+      "natural_label": "milk",
+      "parents": [
+        "Food",
+        "IsPerceivable"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Milk",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Mug": {
+      "aliases": [],
+      "ancestors": [
+        "DrinkingContainer",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Mug",
+      "natural_label": "mug",
+      "parents": [
+        "DrinkingContainer"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Mug",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "MustardBottle": {
+      "aliases": [],
+      "ancestors": [
+        "Bottle",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "MustardBottle",
+      "natural_label": "mustard bottle",
+      "parents": [
+        "Bottle"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.MustardBottle",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Noodles": {
+      "aliases": [],
+      "ancestors": [
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation",
+        "IsPerceivable"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "perceivable",
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Noodles",
+      "natural_label": "noodles",
+      "parents": [
+        "Food",
+        "IsPerceivable"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Noodles",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "OfficeChair": {
+      "aliases": [],
+      "ancestors": [
+        "Chair",
+        "Furniture",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [],
+      "excluded_reason": null,
+      "name": "OfficeChair",
+      "natural_label": "office chair",
+      "parents": [
+        "Chair"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.OfficeChair",
+      "requires_open_close": false,
+      "role": "furniture",
+      "sampleable": true
+    },
+    "Orange": {
+      "aliases": [],
+      "ancestors": [
+        "Fruit",
+        "Produce",
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Orange",
+      "natural_label": "orange",
+      "parents": [
+        "Fruit"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Orange",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Oven": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "navigation-only runtime fixture",
+      "name": "Oven",
+      "natural_label": "oven",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Oven",
+      "requires_open_close": false,
+      "role": "furniture",
+      "sampleable": false
+    },
+    "Pan": {
+      "aliases": [],
+      "ancestors": [
+        "CookingContainer",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Pan",
+      "natural_label": "pan",
+      "parents": [
+        "CookingContainer"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Pan",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "PanLid": {
+      "aliases": [],
+      "ancestors": [
+        "Lid",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "PanLid",
+      "natural_label": "pan lid",
+      "parents": [
+        "Lid"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.PanLid",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Pen": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Pen",
+      "natural_label": "pen",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Pen",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Pencil": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Pencil",
+      "natural_label": "pencil",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Pencil",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Plate": {
+      "aliases": [],
+      "ancestors": [
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "root_body",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": null,
+      "name": "Plate",
+      "natural_label": "plate",
+      "parents": [
+        "HasSupportingSurface"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Plate",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Poster": {
+      "aliases": [],
+      "ancestors": [
+        "WallDecor",
+        "Decor",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "wall decor",
+      "name": "Poster",
+      "natural_label": "poster",
+      "parents": [
+        "WallDecor"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Poster",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "Pot": {
+      "aliases": [],
+      "ancestors": [
+        "CookingContainer",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Pot",
+      "natural_label": "pot",
+      "parents": [
+        "CookingContainer"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Pot",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "PotLid": {
+      "aliases": [],
+      "ancestors": [
+        "Lid",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "PotLid",
+      "natural_label": "pot lid",
+      "parents": [
+        "Lid"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.PotLid",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Potato": {
+      "aliases": [],
+      "ancestors": [
+        "Produce",
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Potato",
+      "natural_label": "potato",
+      "parents": [
+        "Produce"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Potato",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Pringles": {
+      "aliases": [],
+      "ancestors": [
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Pringles",
+      "natural_label": "pringles",
+      "parents": [
+        "Food"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Pringles",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "ProcthorBox": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "large synthetic prop",
+      "name": "ProcthorBox",
+      "natural_label": "procthor box",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.ProcthorBox",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "Produce": {
+      "aliases": [],
+      "ancestors": [
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "concept-only type",
+      "name": "Produce",
+      "natural_label": "produce",
+      "parents": [
+        "Food"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Produce",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "Room": {
+      "aliases": [],
+      "ancestors": [
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [],
+      "excluded_reason": null,
+      "name": "Room",
+      "natural_label": "room",
+      "parents": [
+        "SemanticAnnotation"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Room",
+      "requires_open_close": false,
+      "role": "room",
+      "sampleable": true
+    },
+    "RoomWithWallsAndDoors": {
+      "aliases": [],
+      "ancestors": [
+        "Room",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [],
+      "excluded_reason": null,
+      "name": "RoomWithWallsAndDoors",
+      "natural_label": "room",
+      "parents": [
+        "Room"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.RoomWithWallsAndDoors",
+      "requires_open_close": false,
+      "role": "room",
+      "sampleable": true
+    },
+    "Salt": {
+      "aliases": [],
+      "ancestors": [
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Salt",
+      "natural_label": "salt",
+      "parents": [
+        "Food"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Salt",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "SaltContainer": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation",
+        "IsPerceivable"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "perceivable",
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "SaltContainer",
+      "natural_label": "salt container",
+      "parents": [
+        "HasRootBody",
+        "IsPerceivable"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.SaltContainer",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "SaltPepperShaker": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "SaltPepperShaker",
+      "natural_label": "salt pepper shaker",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.SaltPepperShaker",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "SemanticEnvironmentAnnotation": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "concept-only type",
+      "name": "SemanticEnvironmentAnnotation",
+      "natural_label": "semantic environment annotation",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.SemanticEnvironmentAnnotation",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "ShelfLayer": {
+      "aliases": [
+        "shelf layer"
+      ],
+      "ancestors": [
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "root_body",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": null,
+      "name": "ShelfLayer",
+      "natural_label": "shelf",
+      "parents": [
+        "HasSupportingSurface"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.ShelfLayer",
+      "requires_open_close": false,
+      "role": "surface",
+      "sampleable": true
+    },
+    "ShelvingUnit": {
+      "aliases": [],
+      "ancestors": [
+        "Furniture",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [],
+      "excluded_reason": null,
+      "name": "ShelvingUnit",
+      "natural_label": "shelving unit",
+      "parents": [
+        "Furniture"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.ShelvingUnit",
+      "requires_open_close": false,
+      "role": "furniture",
+      "sampleable": true
+    },
+    "SideTable": {
+      "aliases": [],
+      "ancestors": [
+        "Table",
+        "Furniture",
+        "SemanticAnnotation",
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "root_body",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": null,
+      "name": "SideTable",
+      "natural_label": "side table",
+      "parents": [
+        "Table"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.SideTable",
+      "requires_open_close": false,
+      "role": "surface",
+      "sampleable": true
+    },
+    "Sink": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "navigation-only runtime fixture",
+      "name": "Sink",
+      "natural_label": "sink",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Sink",
+      "requires_open_close": false,
+      "role": "furniture",
+      "sampleable": false
+    },
+    "Slider": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "object part",
+      "name": "Slider",
+      "natural_label": "slider",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Slider",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "SoapBottle": {
+      "aliases": [],
+      "ancestors": [
+        "Bottle",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "SoapBottle",
+      "natural_label": "soap bottle",
+      "parents": [
+        "Bottle"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.SoapBottle",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Sofa": {
+      "aliases": [],
+      "ancestors": [
+        "Furniture",
+        "SemanticAnnotation",
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "root_body",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": null,
+      "name": "Sofa",
+      "natural_label": "sofa",
+      "parents": [
+        "Furniture",
+        "HasSupportingSurface"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Sofa",
+      "requires_open_close": false,
+      "role": "surface",
+      "sampleable": true
+    },
+    "Spoon": {
+      "aliases": [],
+      "ancestors": [
+        "Cuttlery",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation",
+        "IsPerceivable"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "perceivable",
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Spoon",
+      "natural_label": "spoon",
+      "parents": [
+        "Cuttlery",
+        "IsPerceivable"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Spoon",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "SprayBottle": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "SprayBottle",
+      "natural_label": "spray bottle",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.SprayBottle",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Statue": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Statue",
+      "natural_label": "statue",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Statue",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Table": {
+      "aliases": [],
+      "ancestors": [
+        "Furniture",
+        "SemanticAnnotation",
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "root_body",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": null,
+      "name": "Table",
+      "natural_label": "table",
+      "parents": [
+        "Furniture",
+        "HasSupportingSurface"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Table",
+      "requires_open_close": false,
+      "role": "surface",
+      "sampleable": true
+    },
+    "Tomato": {
+      "aliases": [],
+      "ancestors": [
+        "Fruit",
+        "Produce",
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Tomato",
+      "natural_label": "tomato",
+      "parents": [
+        "Fruit"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Tomato",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "TomatoSoup": {
+      "aliases": [],
+      "ancestors": [
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "TomatoSoup",
+      "natural_label": "tomato soup",
+      "parents": [
+        "Food"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.TomatoSoup",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "TrashCan": {
+      "aliases": [
+        "garbage can",
+        "trash bin"
+      ],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation",
+        "Furniture"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "TrashCan",
+      "natural_label": "trash can",
+      "parents": [
+        "HasRootBody",
+        "Furniture"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.TrashCan",
+      "requires_open_close": false,
+      "role": "furniture",
+      "sampleable": true
+    },
+    "TunaCan": {
+      "aliases": [],
+      "ancestors": [
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "TunaCan",
+      "natural_label": "tuna can",
+      "parents": [
+        "Food"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.TunaCan",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Vase": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "Vase",
+      "natural_label": "vase",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Vase",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    },
+    "Vegetable": {
+      "aliases": [],
+      "ancestors": [
+        "Produce",
+        "Food",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "concept-only type",
+      "name": "Vegetable",
+      "natural_label": "vegetable",
+      "parents": [
+        "Produce"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Vegetable",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "Wall": {
+      "aliases": [],
+      "ancestors": [
+        "HasApertures",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "apertures",
+        "root_body"
+      ],
+      "excluded_reason": "world structure",
+      "name": "Wall",
+      "natural_label": "wall",
+      "parents": [
+        "HasApertures"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Wall",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "WallDecor": {
+      "aliases": [],
+      "ancestors": [
+        "Decor",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "concept-only type",
+      "name": "WallDecor",
+      "natural_label": "wall decor",
+      "parents": [
+        "Decor"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.WallDecor",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "WallPanel": {
+      "aliases": [],
+      "ancestors": [
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": "world structure",
+      "name": "WallPanel",
+      "natural_label": "wall panel",
+      "parents": [
+        "HasRootBody"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.WallPanel",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": false
+    },
+    "Wardrobe": {
+      "aliases": [],
+      "ancestors": [
+        "Cabinet",
+        "Furniture",
+        "SemanticAnnotation",
+        "HasCaseAsRootBody",
+        "HasSupportingSurface",
+        "HasStorageSpace",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "HasDrawers",
+        "HasDoors"
+      ],
+      "can_store_objects": true,
+      "capabilities": [
+        "case",
+        "doors",
+        "drawers",
+        "openable",
+        "root_body",
+        "storage_space",
+        "supporting_surface"
+      ],
+      "excluded_reason": null,
+      "name": "Wardrobe",
+      "natural_label": "wardrobe",
+      "parents": [
+        "Cabinet",
+        "HasDrawers",
+        "HasDoors"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.Wardrobe",
+      "requires_open_close": true,
+      "role": "container",
+      "sampleable": true
+    },
+    "WineBottle": {
+      "aliases": [],
+      "ancestors": [
+        "Bottle",
+        "HasRootBody",
+        "HasRootKinematicStructureEntity",
+        "SemanticAnnotation"
+      ],
+      "can_store_objects": false,
+      "capabilities": [
+        "root_body"
+      ],
+      "excluded_reason": null,
+      "name": "WineBottle",
+      "natural_label": "wine bottle",
+      "parents": [
+        "Bottle"
+      ],
+      "qualified_name": "semantic_digital_twin.semantic_annotations.semantic_annotations.WineBottle",
+      "requires_open_close": false,
+      "role": "object",
+      "sampleable": true
+    }
+  }
+}

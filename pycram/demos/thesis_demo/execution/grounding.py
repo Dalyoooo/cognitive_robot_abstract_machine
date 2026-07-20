@@ -1,5 +1,3 @@
-"""Ground planner IDs and relations into semDT bodies, poses, and storage."""
-
 from semantic_digital_twin.reasoning.predicates import (
     Behind,
     InFrontOf,
@@ -15,8 +13,8 @@ from semantic_digital_twin.semantic_annotations.semantic_annotations import Room
 from semantic_digital_twin.spatial_types.spatial_types import Point3, Pose
 from semantic_digital_twin.world_description.world_entity import SemanticAnnotation
 
-from .schema import DIRECTIONAL_RELATIONS, INSIDE_RELATIONS
-from .world_context import (
+from ..validation.schema import DIRECTIONAL_RELATIONS, INSIDE_RELATIONS
+from ..planner.world_context import (
     find_openable_handle,
     is_at_location,
     is_inside_or_attached,
@@ -34,9 +32,7 @@ _DIRECTIONAL_PREDICATES = {
     "in_front_of": InFrontOf,
     "behind": Behind,
 }
-assert set(_DIRECTIONAL_PREDICATES) == set(
-    DIRECTIONAL_RELATIONS
-), "directional predicates must cover exactly the schema relations"
+assert set(_DIRECTIONAL_PREDICATES) == set(DIRECTIONAL_RELATIONS)
 
 
 class GroundingError(Exception):

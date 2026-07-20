@@ -1,5 +1,3 @@
-"""Project a semDT world into the flat planner context schema (CONTEXT_KEYS)."""
-
 import math
 from collections import Counter
 from dataclasses import dataclass
@@ -32,11 +30,10 @@ from semantic_digital_twin.semantic_annotations.semantic_annotations import (
 )
 from semantic_digital_twin.world_description.connections import ActiveConnection1DOF
 
-from .schema import CONTEXT_KEYS
+from ..validation.schema import CONTEXT_KEYS
 
 
 def unique(values):
-    """Remove duplicate values while preserving their input order."""
     return list(dict.fromkeys(values))
 
 
@@ -76,7 +73,6 @@ def _handles(annotation):
 
 
 def _is_locked(connection):
-    """Return whether a connection has an explicit zero-width motion range."""
     try:
         lower = connection.dof.limits.lower.position
         upper = connection.dof.limits.upper.position
@@ -90,7 +86,6 @@ def _is_locked(connection):
 
 
 def find_openable_handle(annotation):
-    """Return the first handle whose connection is articulated, or None."""
     for handle in _handles(annotation):
         root = getattr(handle, "root", None)
         if root is None:

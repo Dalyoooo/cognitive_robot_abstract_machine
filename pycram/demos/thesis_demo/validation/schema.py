@@ -1,13 +1,5 @@
-"""The plan vocabulary: step schema, action names, relations, context keys.
-
-This module is the single owner of the plan contract (I2) and carries no
-imports beyond the standard library, so the bridge, the tooling, and the
-executor can all share it without dragging in semDT or pycram (I1).
-"""
-
 from dataclasses import dataclass
 
-# The context contract: produced by world_context, consumed by prompt.
 CONTEXT_KEYS = (
     "objects",
     "object_locations",

@@ -1,5 +1,3 @@
-"""Post-plan world observations collected from executed CRAM actions."""
-
 from pycram.exceptions import ConditionNotSatisfied
 from pycram.view_manager import ViewManager
 from semantic_digital_twin.world_description.connections import ActiveConnection1DOF

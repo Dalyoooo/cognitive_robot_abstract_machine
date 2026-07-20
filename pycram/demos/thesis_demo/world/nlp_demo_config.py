@@ -35,7 +35,7 @@ from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     WineBottle,
 )
 
-RESOURCES = os.path.join(os.path.dirname(__file__), "..", "..", "resources")
+RESOURCES = os.path.join(os.path.dirname(__file__), "..", "..", "..", "resources")
 OBJECTS_DIR = os.path.join(RESOURCES, "objects")
 
 

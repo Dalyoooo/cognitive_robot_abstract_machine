@@ -1,38 +1,38 @@
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
-CONTEXT_KEYS = (
-    "objects",
-    "object_locations",
-    "surfaces",
-    "containers",
-    "openables",
-    "furniture",
-    "rooms",
-    "types",
-)
+from ...validation.schema import CONTEXT_KEYS
+
 
 Role = Literal["object", "surface", "container", "furniture", "room", "place"]
 Slot = Literal["action", "object", "source", "destination"]
+AREAS = (
+    "kitchen",
+    "dining",
+    "hallway",
+    "living_room",
+    "pantry",
+    "storage",
+    "utility",
+    "work_area",
+)
+
+POSITIONS = ("left", "right", "upper", "lower", "middle", "front", "back")
+
+RECOGNIZED_POSITIONS = frozenset(POSITIONS) | {"top", "bottom", "center"}
+
+IGNORED_REFERENCE_WORDS = frozenset({"main"})
+
+
 DIRECTIONAL_RELATIONS = ("left_of", "right_of", "in_front_of", "behind")
 
 
 def unique(values):
-    """
-    Remove duplicate values while preserving their input order.
-
-    Args:
-        values: Iterable of hashable values.
-
-    Returns:
-        A tuple containing each value once.
-    """
     return tuple(dict.fromkeys(values))
 
 
 @dataclass(frozen=True)
 class WorldContext:
-    """The compact world representation shown to the model."""
 
     objects: tuple[str, ...]
     object_locations: dict[str, tuple[str, ...]]
@@ -43,13 +43,10 @@ class WorldContext:
     rooms: tuple[str, ...]
     types: dict[str, str]
 
-    def to_dict(self):
-        """
-        Convert the context to the runtime dictionary format.
+    def is_openable(self, name):
+        return name in self.openables
 
-        Returns:
-            JSON-compatible context data in runtime key order.
-        """
+    def to_dict(self):
         return {
             "objects": list(self.objects),
             "object_locations": {
@@ -66,24 +63,9 @@ class WorldContext:
 
     @property
     def places(self):
-        """
-        Return all place-like context entities without duplicates.
-
-        Returns:
-            An ordered tuple of surfaces, containers, furniture, and rooms.
-        """
         return unique(self.surfaces + self.containers + self.furniture + self.rooms)
 
     def role_of(self, name):
-        """
-        Return the planner role of a context entity.
-
-        Args:
-            name: Canonical context entity name.
-
-        Returns:
-            The entity role, or None if the name is unknown.
-        """
         for role, names in (
             ("object", self.objects),
             ("surface", self.surfaces),
@@ -96,15 +78,6 @@ class WorldContext:
         return None
 
     def names_for_role(self, role):
-        """
-        Return context entity names for a planner role.
-
-        Args:
-            role: Planner role to select.
-
-        Returns:
-            Entity names for the role, or all places for a general place role.
-        """
         if role == "object":
             return self.objects
         if role == "surface":
@@ -118,12 +91,6 @@ class WorldContext:
         return self.places
 
     def validate(self):
-        """
-        Validate that the context can ground generated plans.
-
-        Raises:
-            ValueError: If categories overlap or references use unknown names.
-        """
         category_sets = [
             set(self.surfaces),
             set(self.containers),
@@ -162,7 +129,6 @@ class WorldContext:
 
 @dataclass(frozen=True)
 class Intent:
-    """A canonical task before it is rendered as language."""
 
     action: Literal[
         "transport",
@@ -179,16 +145,6 @@ class Intent:
     source_explicit: bool = False
 
     def with_slot(self, slot, value):
-        """
-        Return an intent with one grounding slot replaced.
-
-        Args:
-            slot: Intent slot to replace.
-            value: Canonical value assigned to the slot.
-
-        Returns:
-            A new intent containing the updated slot value.
-        """
         if slot == "object":
             return replace(self, object=value)
         if slot == "source":
@@ -198,7 +154,6 @@ class Intent:
 
 @dataclass(frozen=True)
 class Mention:
-    """One entity reference used in a rendered instruction."""
 
     slot: Slot
     text: str | None
@@ -215,7 +170,6 @@ class RenderedInstruction:
 
 @dataclass(frozen=True)
 class Resolution:
-    """Result of grounding generated mentions in a world context."""
 
     status: Literal["resolved", "ambiguous", "missing"]
     intent: Intent
@@ -225,7 +179,6 @@ class Resolution:
 
 @dataclass(frozen=True)
 class PlanStep:
-    """One exact five-field planner action."""
 
     action: str
     object: str | None = None
@@ -234,12 +187,6 @@ class PlanStep:
     source: str | None = None
 
     def to_dict(self):
-        """
-        Convert the plan step to the exact runtime schema.
-
-        Returns:
-            A dictionary containing all five planner action fields.
-        """
         return {
             "action": self.action,
             "object": self.object,
@@ -251,7 +198,6 @@ class PlanStep:
 
 @dataclass(frozen=True)
 class Scenario:
-    """A sampled task, its context, and its chosen referring style."""
 
     id: str
     family: str
@@ -263,27 +209,14 @@ class Scenario:
     extra_references: tuple[dict[Slot, str | None], ...] = ()
 
     def intents(self):
-        """
-        Return every intent in conversation order.
-
-        Returns:
-            The primary intent followed by any additional intents.
-        """
         return (self.intent, *self.extra_intents)
 
     def reference_sets(self):
-        """
-        Return every reference mapping in conversation order.
-
-        Returns:
-            The primary references followed by additional reference mappings.
-        """
         return (self.references, *self.extra_references)
 
 
 @dataclass
 class RawExample:
-    """A validated example before conversion to fine-tuning JSONL."""
 
     scenario_id: str
     family: str

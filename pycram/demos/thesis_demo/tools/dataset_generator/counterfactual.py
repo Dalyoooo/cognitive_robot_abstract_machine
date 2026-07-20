@@ -3,7 +3,6 @@ from dataclasses import replace
 
 
 def _object_mapping(context):
-    """Map every movable object to a deterministic opaque ID."""
     used_names = set(context.places)
     mapping = {}
     next_number = 1
@@ -21,7 +20,6 @@ def _object_mapping(context):
 
 
 def _rename_context_objects(context, mapping):
-    """Return the same world with different movable-object IDs."""
     renamed_types = {}
     for name, type_name in context.types.items():
         renamed_name = mapping.get(name, name)
@@ -40,7 +38,6 @@ def _rename_context_objects(context, mapping):
 
 
 def _rename_intent_objects(intent, mapping):
-    """Apply an object-ID mapping to one intent."""
     return replace(
         intent,
         object=mapping.get(intent.object, intent.object),
@@ -49,19 +46,6 @@ def _rename_intent_objects(intent, mapping):
 
 
 def make_counterfactual_scenario(scenario):
-    """
-    Create an opaque-ID version of a directly resolved object task.
-
-    The paired scenario keeps the exact same natural instruction. Only the
-    world context and canonical object IDs change, so the correct plan must be
-    grounded from the provided ``types`` and ``object_locations`` mappings.
-
-    Args:
-        scenario: Directly resolved scenario to remap.
-
-    Returns:
-        The remapped scenario, or None when the scenario cannot be paired.
-    """
     if scenario.family.startswith("clarify_"):
         return None
 

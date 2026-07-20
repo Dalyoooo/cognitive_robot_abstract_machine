@@ -7,7 +7,7 @@ from pathlib import Path
 
 from ...planner.prompt import system_prompt, user_turn
 
-from .catalog import DEFAULT_CATALOG_PATH, export_catalog
+from .catalog import DEFAULT_CATALOG_PATH, SCHEMA_VERSION, SemanticCatalog
 from .counterfactual import make_counterfactual_scenario
 from .domain import Mention, RawExample
 from .language import render_instruction
@@ -81,7 +81,6 @@ def _answer_reference(selected, resolution, scenario, catalog):
 
 
 def _resolve_scenario(scenario, rendered, catalog):
-    """Resolve every rendered clause and check the scenario's expected outcome."""
     clauses = rendered.clauses or (rendered,)
     resolutions = []
     for intent, clause in zip(scenario.intents(), clauses, strict=True):
@@ -102,7 +101,6 @@ def _resolve_scenario(scenario, rendered, catalog):
 
 
 def _initial_messages(rendered, context_dict):
-    """Build the system and first user messages shared by every example."""
     return [
         {"role": "system", "content": system_prompt()},
         {"role": "user", "content": user_turn(rendered.text, context_dict)},
@@ -116,7 +114,6 @@ def _clarification_dialogue(
     context_dict,
     catalog,
 ):
-    """Resolve one clarification answer and return its two dialogue turns."""
     context = scenario.context
     question = clarification_question(resolution, context, catalog)
     selected = _selected_value(scenario, resolution)
@@ -155,7 +152,6 @@ def _clarification_dialogue(
 
 
 def _compile_intents(intents, context, catalog):
-    """Compile and validate intents in conversation order."""
     steps = []
     for intent in intents:
         intent_steps = compile_plan(intent, context, catalog)
@@ -165,20 +161,6 @@ def _compile_intents(intents, context, catalog):
 
 
 def build_example_from_rendered(scenario, rendered, catalog):
-    """
-    Build an example from an instruction that has already been rendered.
-
-    Args:
-        scenario: Scenario containing the intended task and world context.
-        rendered: Rendered instruction and its entity mentions.
-        catalog: Semantic catalog used to resolve references and compile plans.
-
-    Returns:
-        A pair containing the validated raw example and rendered instruction.
-
-    Raises:
-        ValueError: If grounding, plan compilation, or validation fails.
-    """
     context = scenario.context
     context_dict = context.to_dict()
     resolutions, expects_clarification = _resolve_scenario(
@@ -227,26 +209,11 @@ def build_example_from_rendered(scenario, rendered, catalog):
 
 
 def build_example(scenario, catalog, rng):
-    """
-    Render and build one direct plan or clarification dialogue.
-
-    Args:
-        scenario: Scenario to render and compile.
-        catalog: Semantic catalog used for grounding and plan compilation.
-        rng: Random generator used to select a language template.
-
-    Returns:
-        A pair containing the validated raw example and rendered instruction.
-
-    Raises:
-        ValueError: If rendering, grounding, compilation, or validation fails.
-    """
     rendered = render_instruction(scenario, rng)
     return build_example_from_rendered(scenario, rendered, catalog)
 
 
 def _compose_context(composer, family, family_index, rng):
-    """Compose a normal world or a larger ambiguity-training world."""
     if family not in VARIABLE_AMBIGUITY_FAMILIES:
         return composer.compose(rng)
     number_of_sizes = MAX_AMBIGUITY_SIZE - MIN_AMBIGUITY_SIZE + 1
@@ -255,7 +222,6 @@ def _compose_context(composer, family, family_index, rng):
 
 
 def _generate_example(composer, sampler, catalog, family, family_index, serial, seed):
-    """Generate one example, retrying only world/scenario sampling failures."""
     last_error = None
     for attempt in range(MAX_SAMPLING_ATTEMPTS):
         rng = random.Random(f"{seed}:{family}:{family_index}:{attempt}")
@@ -272,8 +238,6 @@ def _generate_example(composer, sampler, catalog, family, family_index, serial, 
             last_error = error
             continue
 
-        # Contract errors from rendering, grounding, or validation must fail
-        # immediately instead of being hidden by another sampling attempt.
         example, rendered = build_example(scenario, catalog, rng)
         return scenario, example, rendered
 
@@ -283,7 +247,6 @@ def _generate_example(composer, sampler, catalog, family, family_index, serial, 
 
 
 def _context_pair(scenario, example, rendered, catalog):
-    """Return a base example and, when possible, its context counterfactual."""
     counterfactual_scenario = make_counterfactual_scenario(scenario)
     if counterfactual_scenario is None:
         return ((scenario, example, rendered),)
@@ -308,23 +271,6 @@ def _context_pair(scenario, example, rendered, catalog):
 
 
 def generate_base_examples(composer, sampler, catalog, *, per_family, seed):
-    """
-    Generate a fixed quota from every scenario family.
-
-    Args:
-        composer: World composer used to create symbolic contexts.
-        sampler: Scenario sampler used to select canonical tasks.
-        catalog: Semantic catalog used to build and validate examples.
-        per_family: Number of base scenarios to generate per family.
-        seed: Seed used to derive deterministic per-scenario generators.
-
-    Returns:
-        Three parallel lists containing scenarios, examples, and rendered rows.
-
-    Raises:
-        RuntimeError: If a valid world and scenario cannot be sampled.
-        ValueError: If a generated example violates a build contract.
-    """
     work = []
     for family in FAMILIES:
         for family_index in range(per_family):
@@ -355,16 +301,6 @@ def generate_base_examples(composer, sampler, catalog, *, per_family, seed):
 
 
 def split_examples(examples, seed):
-    """
-    Split examples by task family while keeping context pairs together.
-
-    Args:
-        examples: Validated examples to divide into train and validation sets.
-        seed: Seed used to shuffle family groups and final splits.
-
-    Returns:
-        A pair containing the training and validation example lists.
-    """
     by_family = {}
     for example in examples:
         group_id = example.metadata.get("pair_id", example.scenario_id)
@@ -389,18 +325,14 @@ def split_examples(examples, seed):
 
 
 def _training_row(example, split):
-    template_family = example.metadata.get("pair_id", example.scenario_id)
     return {
         "messages": example.messages,
         "metadata": {
             "scenario_id": example.scenario_id,
             "family": example.family,
-            "task_type": example.family,
             "world_id": example.world_id,
             "template_id": example.template_id,
-            "template_family": template_family,
             "split": split,
-            "context_dict": example.context.to_dict(),
             **example.metadata,
         },
     }
@@ -432,20 +364,6 @@ def write_dataset(
     seed,
     per_family,
 ):
-    """
-    Write dataset rows and build metadata to an output directory.
-
-    Args:
-        output_dir: Directory that receives the generated artifacts.
-        scenarios: Generated scenarios to write for inspection.
-        train: Examples assigned to the training split.
-        val: Examples assigned to the validation split.
-        seed: Seed recorded in the manifest.
-        per_family: Base scenario quota recorded in the manifest.
-
-    Raises:
-        OSError: If an output directory or file cannot be written.
-    """
     output_dir.mkdir(parents=True, exist_ok=True)
     all_examples = train + val
     _write_jsonl(
@@ -470,7 +388,7 @@ def write_dataset(
     _write_jsonl(output_dir / "review.jsonl", review)
 
     manifest = {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "seed": seed,
         "per_family": per_family,
         "counts": {
@@ -485,17 +403,6 @@ def write_dataset(
 
 
 def validate_holdouts(examples, policy, catalog):
-    """
-    Reject examples that contain held-out entities or terms.
-
-    Args:
-        examples: Examples whose contexts and messages should be checked.
-        policy: Holdout policy defining forbidden entities and terms.
-        catalog: Semantic catalog used to expand forbidden type labels.
-
-    Raises:
-        ValueError: If any context or message contains held-out data.
-    """
     for example in examples:
         policy.assert_clean(example.context, catalog)
         policy.assert_text_clean(json.dumps(example.messages), catalog)
@@ -512,18 +419,10 @@ def _parse_args():
 
 
 def main():
-    """
-    Generate the dataset from command-line arguments.
-
-    Raises:
-        SystemExit: If the requested per-family quota is not positive.
-    """
     args = _parse_args()
     if args.per_family < 1:
         raise SystemExit("--per-family must be positive")
-    # Exporting is cheap and prevents a committed catalog from silently
-    # becoming stale after semDT or the small planner policy changes.
-    catalog = export_catalog(args.catalog)
+    catalog = SemanticCatalog.load(args.catalog)
     holdout = HoldoutPolicy.load(args.holdout)
     composer = WorldComposer(catalog, holdout)
     sampler = ScenarioSampler(catalog)

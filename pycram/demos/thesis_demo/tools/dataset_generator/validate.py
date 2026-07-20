@@ -2,7 +2,7 @@ import json
 import re
 
 from .domain import DIRECTIONAL_RELATIONS
-from .world import storage_containers
+from .policy import check_destination, include_source, resolve_source
 
 STEP_KEYS = {"action", "object", "location", "relation", "source"}
 ACTIONS = {
@@ -22,20 +22,6 @@ def _required(value, field):
     return value
 
 
-def _source(intent, context):
-    object_name = _required(intent.object, "object")
-    locations = context.object_locations.get(object_name, ())
-    if intent.source is not None:
-        return intent.source
-    if len(locations) != 1:
-        raise ValueError(f"intent needs one source for {object_name!r}")
-    return locations[0]
-
-
-def _openable(name, context):
-    return name in context.openables
-
-
 def _goal_step(steps, action):
     matches = [step for step in steps if step.action == action]
     if len(matches) != 1:
@@ -44,12 +30,9 @@ def _goal_step(steps, action):
 
 
 def _expected_source(intent, context):
-    source = _source(intent, context)
-    locations = context.object_locations.get(intent.object, ())
-    include_source = (
-        intent.source_explicit or len(locations) > 1 or _openable(source, context)
-    )
-    if include_source:
+    _required(intent.object, "object")
+    source, location_count = resolve_source(intent, context)
+    if include_source(intent, source, location_count, context):
         return source
     return None
 
@@ -121,16 +104,8 @@ def _validate_goal(intent, steps, context):
 def _validate_relations(intent, context, catalog):
     if intent.action not in {"transport", "pickup_place"}:
         return
-    destination = _required(intent.destination, "destination")
-    if intent.relation == "on" and destination not in context.surfaces:
-        raise ValueError("relation 'on' requires a surface")
-    if intent.relation == "inside" and destination not in storage_containers(
-        context, catalog
-    ):
-        raise ValueError("relation 'inside' requires storage")
-    if intent.relation in DIRECTIONAL_RELATIONS:
-        if destination not in context.objects or destination == intent.object:
-            raise ValueError("directional relation requires another object")
+    _required(intent.destination, "destination")
+    check_destination(intent, context, catalog)
 
 
 def _navigation_target(step, context):
@@ -140,7 +115,6 @@ def _navigation_target(step, context):
 
 
 def _validate_navigation_sequence(steps):
-    """Require every arm-parking step and navigation step to form a pair."""
     for index, step in enumerate(steps):
         if step.action == "ParkArmsAction":
             if index + 1 >= len(steps) or steps[index + 1].action != "NavigateAction":
@@ -153,7 +127,7 @@ def _validate_navigation_sequence(steps):
 def _validate_open_step(step, current_location, opened, context):
     if current_location != step.object:
         raise ValueError("OpenAction needs matching navigation")
-    if not _openable(step.object, context):
+    if not context.is_openable(step.object):
         raise ValueError(f"non-openable container {step.object!r}")
     opened.add(step.object)
 
@@ -177,7 +151,7 @@ def _validate_place_step(step, held, opened, context):
         raise ValueError("PlaceAction needs a preceding PickUpAction")
     if (
         step.relation == "inside"
-        and _openable(step.location, context)
+        and context.is_openable(step.location)
         and step.location not in opened
     ):
         raise ValueError("PlaceAction accesses an unopened container")
@@ -186,7 +160,7 @@ def _validate_place_step(step, held, opened, context):
 
 def _validate_transport_step(step, opened, context):
     for container in (step.source, step.location):
-        if _openable(container, context) and container not in opened:
+        if context.is_openable(container) and container not in opened:
             raise ValueError(f"TransportAction accesses unopened {container!r}")
 
 
@@ -194,14 +168,13 @@ def _expected_open_containers(intent, context):
     if intent.action == "open":
         return {intent.destination or intent.object}
     if intent.action == "pickup":
-        source = _source(intent, context)
-        if _openable(source, context):
+        source, _location_count = resolve_source(intent, context)
+        if context.is_openable(source):
             return {source}
     return set()
 
 
 def _validate_access(intent, steps, context):
-    """Follow the plan and check navigation, open containers, and held objects."""
     current_location = None
     opened = set()
     held = set()
@@ -226,18 +199,6 @@ def _validate_access(intent, steps, context):
 
 
 def validate_plan(intent, steps, context, catalog):
-    """
-    Check the intended goal and semDT container-access invariants.
-
-    Args:
-        intent: Grounded intent that the plan must satisfy.
-        steps: Canonical plan steps to validate.
-        context: World context containing referenced entities.
-        catalog: Semantic catalog providing storage capabilities.
-
-    Raises:
-        ValueError: If the context, goal, sequence, or access pattern is invalid.
-    """
     context.validate()
     _validate_relations(intent, context, catalog)
     _validate_goal(intent, steps, context)
@@ -279,15 +240,6 @@ def _reject_raw_ids(text, context):
 
 
 def validate_messages(example):
-    """
-    Validate role alternation, JSON shape, and user-facing text.
-
-    Args:
-        example: Raw example containing the conversation and world context.
-
-    Raises:
-        ValueError: If message order, payload shape, or visible text is invalid.
-    """
     if not example.messages or example.messages[0].get("role") != "system":
         raise ValueError("conversation must start with a system message")
 
@@ -319,15 +271,6 @@ def validate_messages(example):
 
 
 def validate_unique_examples(examples):
-    """
-    Reject duplicate conversations and scenario IDs.
-
-    Args:
-        examples: Raw examples to compare.
-
-    Raises:
-        ValueError: If a scenario ID or serialized conversation is duplicated.
-    """
     scenario_ids = set()
     conversations = set()
     for example in examples:

@@ -3,14 +3,13 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .domain import WorldContext
+from .domain import AREAS, POSITIONS, WorldContext
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_HOLDOUT_PATH = PACKAGE_DIR / "assets" / "holdout.json"
 
 
 def _compact_text(value):
-    """Return lowercase letters and digits without separators."""
     return "".join(re.findall(r"[a-z0-9]+", value.casefold()))
 
 
@@ -24,7 +23,6 @@ def _contains_term(text, term):
 
 @dataclass(frozen=True)
 class HoldoutPolicy:
-    """Evaluation entities that may not occur in generated training rows."""
 
     objects: frozenset[str]
     instances: frozenset[str]
@@ -33,19 +31,6 @@ class HoldoutPolicy:
 
     @classmethod
     def load(cls, path=DEFAULT_HOLDOUT_PATH):
-        """
-        Load a holdout policy from JSON.
-
-        Args:
-            path: Path to the holdout policy file.
-
-        Returns:
-            The parsed immutable holdout policy.
-
-        Raises:
-            OSError: If the policy file cannot be read.
-            json.JSONDecodeError: If the policy file is not valid JSON.
-        """
         value = json.loads(Path(path).read_text(encoding="utf-8"))
         return cls(
             objects=frozenset(map(str, value.get("objects", ()))),
@@ -55,46 +40,16 @@ class HoldoutPolicy:
         )
 
     def forbidden_terms(self, catalog):
-        """
-        Expand held-out types into forbidden natural-language terms.
-
-        Args:
-            catalog: Semantic catalog providing direct labels and aliases.
-
-        Returns:
-            A frozen set of forbidden object names, terms, and type labels.
-        """
         labels = set(self.terms) | set(self.objects)
         for type_name in self.types:
             if type_name in catalog:
-                # Shared ancestors such as ``Food`` and ``Furniture`` remain
-                # valid training concepts; only the held-out leaf labels leak.
                 labels.update(catalog.labels_for(type_name, include_ancestors=False))
         return frozenset(labels)
 
     def allows_type(self, type_name):
-        """
-        Check whether a semDT type may appear in generated training data.
-
-        Args:
-            type_name: semDT type name to check.
-
-        Returns:
-            True if the type is not held out.
-        """
         return type_name not in self.types
 
     def assert_clean(self, context, catalog):
-        """
-        Reject held-out names, types, and terms in a world context.
-
-        Args:
-            context: Generated world context to inspect.
-            catalog: Semantic catalog used to expand held-out type labels.
-
-        Raises:
-            ValueError: If held-out data appears in the context.
-        """
         names = set(context.objects) | set(context.places)
         leaked_names = names & (set(self.objects) | set(self.instances))
         if leaked_names:
@@ -121,16 +76,6 @@ class HoldoutPolicy:
             )
 
     def assert_text_clean(self, text, catalog):
-        """
-        Reject evaluation names and lexical aliases in final messages.
-
-        Args:
-            text: Serialized user-facing text to inspect.
-            catalog: Semantic catalog used to expand held-out type labels.
-
-        Raises:
-            ValueError: If held-out data appears in the text.
-        """
         forbidden = (
             set(self.objects) | set(self.instances) | set(self.forbidden_terms(catalog))
         )
@@ -150,42 +95,7 @@ def _assert_unprefixed_ids(context):
         raise ValueError(f"generated planner IDs must not contain '/': {prefixed}")
 
 
-_AREAS = (
-    "kitchen",
-    "dining",
-    "hallway",
-    "living_room",
-    "pantry",
-    "storage",
-    "utility",
-    "work_area",
-)
-_POSITIONS = ("left", "right", "upper", "lower", "middle", "front", "back")
-
-
-def storage_containers(context, catalog):
-    """
-    Return containers that semDT marks as storage places.
-
-    Doors remain in ``world_context.containers`` because they can be opened and
-    closed, but they are not valid pickup or transport endpoints.
-
-    Args:
-        context: World context containing container instances and types.
-        catalog: Semantic catalog providing storage capabilities.
-
-    Returns:
-        A tuple of canonical container names that can store objects.
-    """
-    return tuple(
-        name
-        for name in context.containers
-        if catalog.can_store_objects(context.types[name])
-    )
-
-
 class WorldComposer:
-    """Create small deterministic worlds directly from the semDT catalog."""
 
     def __init__(self, catalog, holdout):
         self.catalog = catalog
@@ -206,7 +116,6 @@ class WorldComposer:
         *,
         repeated_type_count=1,
     ):
-        """Select types, optionally repeating one type for ambiguity examples."""
         candidates = self._available_types(role)
         if count and not candidates:
             raise ValueError(f"semDT catalog has no sampleable {role} types")
@@ -240,13 +149,12 @@ class WorldComposer:
         rows = []
         for type_name in type_names:
             token = _safe_token(self.catalog.natural_label(type_name))
-            base = f"{rng.choice(_AREAS)}_{rng.choice(_POSITIONS)}_{token}"
+            base = f"{rng.choice(AREAS)}_{rng.choice(POSITIONS)}_{token}"
             name = self._unique_name(base, used)
             rows.append((name, type_name))
         return rows
 
     def _simple_rows(self, type_names, used):
-        """Create names for entities that need no area or position prefix."""
         rows = []
         for type_name in type_names:
             label = self.catalog.natural_label(type_name)
@@ -275,25 +183,6 @@ class WorldComposer:
         room_count=6,
         duplicate_count=2,
     ):
-        """
-        Compose a varied symbolic world while retaining semDT roles.
-
-        Args:
-            rng: Random generator used for deterministic composition.
-            object_count: Number of movable object instances to create.
-            surface_count: Number of surface instances to create.
-            container_count: Number of container instances to create.
-            furniture_count: Number of furniture instances to create.
-            room_count: Number of room instances to create.
-            duplicate_count: Number of instances created from one duplicated
-                place type (used for ambiguity examples).
-
-        Returns:
-            A validated world context containing generated canonical IDs.
-
-        Raises:
-            ValueError: If the catalog cannot provide a valid symbolic world.
-        """
         used = set()
         object_types = self._select_types("object", object_count, rng)
         repeated_type_count = max(2, duplicate_count)

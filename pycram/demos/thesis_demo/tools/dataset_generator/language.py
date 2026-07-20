@@ -105,13 +105,11 @@ def _shown(value, fallback):
 
 
 def _fill_template(templates, rng, **values):
-    """Choose and fill one template, returning its stable list position."""
     template = rng.choice(templates)
     return template.format(**values), templates.index(template)
 
 
 def _join_clauses(clauses):
-    """Join direct multi-task commands into one coordinated instruction."""
     parts = []
     for index, clause in enumerate(clauses):
         text = clause.text.rstrip(".?!")
@@ -201,19 +199,6 @@ def _render_single(intent, references, context, rng, family):
 
 
 def render_instruction(scenario, rng):
-    """
-    Render a single task or direct multi-task instruction.
-
-    Args:
-        scenario: Scenario whose intents and references should be rendered.
-        rng: Random generator used to select language templates.
-
-    Returns:
-        The rendered instruction with its grounding mentions.
-
-    Raises:
-        ValueError: If the scenario contains an unsupported action.
-    """
     clauses = []
     for intent, references in zip(scenario.intents(), scenario.reference_sets()):
         clause = _render_single(

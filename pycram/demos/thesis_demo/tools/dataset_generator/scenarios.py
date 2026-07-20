@@ -2,7 +2,12 @@ from dataclasses import replace
 
 from .domain import DIRECTIONAL_RELATIONS, Intent, PlanStep, Scenario
 from .resolver import matching_names, natural_reference
-from .world import storage_containers
+from .policy import (
+    check_destination,
+    include_source,
+    resolve_source,
+    storage_containers,
+)
 
 TRANSPORT_FAMILIES = {
     "transport_surface_surface": ("surface", "surface"),
@@ -49,7 +54,6 @@ def _replace_location(context, object_name, locations):
 
 
 def _references(object_text=None, source_text=None, destination_text=None):
-    """Build the three reference slots used by every scenario."""
     return {
         "object": object_text,
         "source": source_text,
@@ -58,55 +62,33 @@ def _references(object_text=None, source_text=None, destination_text=None):
 
 
 def _is_instance_name(label, names):
-    """Return whether a catalog label is also an exact world instance name."""
     normalised_label = label.strip().casefold()
     return any(normalised_label == name.strip().casefold() for name in names)
 
 
 def _choices_except(names, *excluded):
-    """Return choices in their original order, without excluded names."""
     excluded_names = set(excluded)
     return tuple(name for name in names if name not in excluded_names)
 
 
 class ScenarioSampler:
-    """Sample canonical task families without embedding language templates."""
 
     def __init__(self, catalog):
         self.catalog = catalog
 
     def _storage_places(self, context):
-        """Return containers that can hold generated objects."""
         return storage_containers(context, self.catalog)
 
     def _object_places(self, context):
-        """Return every surface or storage container that may hold an object."""
         return context.surfaces + self._storage_places(context)
 
     @staticmethod
     def _require_openables(context):
-        """Return openable containers or explain why sampling cannot continue."""
         if not context.openables:
             raise ValueError("world has no openable container")
         return context.openables
 
     def sample(self, family, context, rng, serial, *, world_id="composed"):
-        """
-        Sample one canonical task from a scenario family.
-
-        Args:
-            family: Scenario family to sample.
-            context: World context that supplies task entities.
-            rng: Random generator used for deterministic choices.
-            serial: Serial number used to construct the scenario ID.
-            world_id: Identifier assigned to the scenario world.
-
-        Returns:
-            A scenario containing any context adjustments required by the family.
-
-        Raises:
-            ValueError: If the family is unknown or the context cannot support it.
-        """
         if family not in FAMILIES:
             raise ValueError(f"unknown scenario family: {family}")
         if not context.objects:
@@ -160,7 +142,6 @@ class ScenarioSampler:
         )
 
     def _simple_action(self, family, context, rng, serial):
-        """Sample an action that does not move a household object."""
         if family == "navigate":
             destination = rng.choice(context.places)
             reference = natural_reference(
@@ -183,7 +164,6 @@ class ScenarioSampler:
         return Intent(family, object=container), _references(object_text=reference)
 
     def _clarification(self, family, context, rng):
-        """Sample one of the single-task clarification families."""
         if family == "clarify_missing_object":
             return self._missing_object(context, rng)
         if family == "clarify_open_container":
@@ -448,7 +428,6 @@ class ScenarioSampler:
         return context, intent, references
 
     def _transport_references(self, context, intent):
-        """Create spoken references for a fully specified transport intent."""
         object_name = intent.object
         source = intent.source
         destination = intent.destination
@@ -513,11 +492,7 @@ class ScenarioSampler:
         return rng.choice(candidates)
 
 
-# ----- Plan compilation -----
-
-
 def _navigation_steps(location):
-    """Park the arms before navigating to a location."""
     return (
         PlanStep("ParkArmsAction"),
         PlanStep("NavigateAction", location=location),
@@ -540,68 +515,29 @@ def _require_name(name, allowed, field):
     return name
 
 
-def _is_openable(name, context):
-    return name in context.openables
-
-
 def _source_for(intent, context, catalog):
-    """Return the selected source and number of possible object locations."""
     object_name = _require_name(intent.object, context.objects, "object")
-    locations = context.object_locations.get(object_name, ())
-    source = intent.source
-    if source is None:
-        if not locations:
-            raise ValueError(f"source is missing for {object_name!r}")
-        if len(locations) > 1:
-            raise ValueError(f"source is ambiguous for {object_name!r}: {locations}")
-        source = locations[0]
-
+    source, location_count = resolve_source(intent, context)
     _require_name(
         source,
         context.surfaces + storage_containers(context, catalog),
         "source",
     )
+    locations = context.object_locations.get(object_name, ())
     if locations and source not in locations:
         raise ValueError(f"{object_name!r} is not located at source {source!r}")
-    return source, len(locations)
-
-
-def _destination_for(intent, context, catalog):
-    destination = intent.destination
-    if intent.relation == "on":
-        if destination not in context.surfaces:
-            raise ValueError("relation 'on' requires a surface destination")
-        return destination
-    if intent.relation == "inside":
-        if destination not in storage_containers(context, catalog):
-            raise ValueError("relation 'inside' requires a storage destination")
-        return destination
-    if intent.relation in DIRECTIONAL_RELATIONS:
-        destination = _require_name(destination, context.objects, "reference object")
-        if destination == intent.object:
-            raise ValueError("an object cannot be placed relative to itself")
-        return destination
-    raise ValueError(
-        "relation must be on, inside, left_of, right_of, in_front_of, or behind"
-    )
-
-
-def _include_source(intent, source, location_count, context):
-    """Return whether the source is serialized: explicit in the instruction,
-    an openable container whose access must be shown, or one of several
-    known object locations."""
-    return intent.source_explicit or _is_openable(source, context) or location_count > 1
+    return source, location_count
 
 
 def _compile_transport(intent, context, catalog):
     object_name = _require_name(intent.object, context.objects, "object")
-    destination = _destination_for(intent, context, catalog)
+    destination = check_destination(intent, context, catalog)
     source, location_count = _source_for(intent, context, catalog)
     if source == destination:
         raise ValueError("transport source and destination must be different")
 
-    source_openable = _is_openable(source, context)
-    destination_openable = _is_openable(destination, context)
+    source_openable = context.is_openable(source)
+    destination_openable = context.is_openable(destination)
     steps = []
     if source_openable:
         steps.extend((*_navigation_steps(source), _open(source)))
@@ -609,7 +545,7 @@ def _compile_transport(intent, context, catalog):
         steps.extend((*_navigation_steps(destination), _open(destination)))
 
     step_source = None
-    if _include_source(intent, source, location_count, context):
+    if include_source(intent, source, location_count, context):
         step_source = source
     steps.append(
         PlanStep(
@@ -621,8 +557,6 @@ def _compile_transport(intent, context, catalog):
         )
     )
 
-    # TransportAction ends at the destination. Close it first, then return to
-    # any source that was opened solely for access.
     if destination_openable:
         steps.append(_close(destination))
     if source_openable:
@@ -633,13 +567,13 @@ def _compile_transport(intent, context, catalog):
 def _compile_pickup(intent, context, catalog):
     object_name = _require_name(intent.object, context.objects, "object")
     source, location_count = _source_for(intent, context, catalog)
-    source_openable = _is_openable(source, context)
+    source_openable = context.is_openable(source)
     steps = list(_navigation_steps(source))
     if source_openable:
         steps.append(_open(source))
 
     step_source = None
-    if _include_source(intent, source, location_count, context):
+    if include_source(intent, source, location_count, context):
         step_source = source
     steps.append(
         PlanStep(
@@ -652,7 +586,7 @@ def _compile_pickup(intent, context, catalog):
 
 
 def _placement_navigation(intent, context, catalog):
-    destination = _destination_for(intent, context, catalog)
+    destination = check_destination(intent, context, catalog)
     if intent.relation not in DIRECTIONAL_RELATIONS:
         return destination
 
@@ -669,21 +603,20 @@ def _placement_navigation(intent, context, catalog):
 def _compile_pickup_place(intent, context, catalog):
     object_name = _require_name(intent.object, context.objects, "object")
     source, location_count = _source_for(intent, context, catalog)
-    if _is_openable(source, context):
+    if context.is_openable(source):
         raise ValueError("pickup-and-place examples require a surface source")
 
-    destination = _destination_for(intent, context, catalog)
-    destination_openable = _is_openable(destination, context)
+    destination = check_destination(intent, context, catalog)
+    destination_openable = context.is_openable(destination)
     placement_navigation = _placement_navigation(intent, context, catalog)
     steps = []
 
-    # Open a destination before pickup so a one-arm robot can still access it.
     if destination_openable:
         steps.extend((*_navigation_steps(destination), _open(destination)))
 
     steps.extend(_navigation_steps(source))
     step_source = None
-    if _include_source(intent, source, location_count, context):
+    if include_source(intent, source, location_count, context):
         step_source = source
     steps.append(
         PlanStep(
@@ -712,26 +645,12 @@ def _container_target(intent, context):
     if target is None:
         target = intent.object
     target = _require_name(target, context.containers, "container")
-    if not _is_openable(target, context):
+    if not context.is_openable(target):
         raise ValueError(f"container {target!r} is not openable")
     return target
 
 
 def compile_plan(intent, context, catalog):
-    """
-    Compile one fully grounded intent into its canonical plan.
-
-    Args:
-        intent: Grounded canonical intent to compile.
-        context: World context containing all referenced entities.
-        catalog: Semantic catalog providing storage capabilities.
-
-    Returns:
-        An ordered tuple of canonical planner steps.
-
-    Raises:
-        ValueError: If the intent or context cannot produce a valid plan.
-    """
     context.validate()
 
     if intent.action == "transport":

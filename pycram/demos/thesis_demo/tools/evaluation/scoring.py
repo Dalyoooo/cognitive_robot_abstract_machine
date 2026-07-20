@@ -301,11 +301,11 @@ class LiveSummary:
 def _step_matches(step, reference):
     """Return whether one generated step matches every field of a reference."""
     return isinstance(step, dict) and all(
-        _field_matches(step.get(key), value) for key, value in reference.items()
+        field_matches(step.get(key), value) for key, value in reference.items()
     )
 
 
-def _field_matches(actual, expected):
+def field_matches(actual, expected):
     """Return whether an actual field matches one or several accepted values."""
     if isinstance(expected, list):
         return actual in expected
@@ -341,7 +341,7 @@ def _reference_satisfied(steps, expected):
     source = "source" not in expected or any(
         isinstance(step, dict)
         and step.get("object") == expected.get("object")
-        and _field_matches(step.get("source"), expected["source"])
+        and field_matches(step.get("source"), expected["source"])
         for step in steps
     )
     return destination and source
@@ -377,22 +377,27 @@ def exact_plan_match(case, payload):
     )
 
 
+def allowed_names_for_step(step, names):
+    """Return the context names each plan-step field is allowed to reference."""
+    action = step.get("action")
+    relation = step.get("relation")
+    return {
+        "object": allowed_objects_for(action, names),
+        "location": allowed_locations_for(action, relation, names),
+        "source": names.sources,
+    }
+
+
 def has_hallucinated_name(plan, context):
     """Return whether a plan references a name absent from its context."""
     names = context_names(context)
     for step in plan.get("plan", []):
         if not isinstance(step, dict):
             continue
-        action = step.get("action")
-        relation = step.get("relation")
-        allowed_objects = allowed_objects_for(action, names)
-        if step.get("object") and step["object"] not in allowed_objects:
-            return True
-        allowed_locations = allowed_locations_for(action, relation, names)
-        if step.get("location") and step["location"] not in allowed_locations:
-            return True
-        if step.get("source") and step["source"] not in names.sources:
-            return True
+        for field_name, allowed_names in allowed_names_for_step(step, names).items():
+            value = step.get(field_name)
+            if value and value not in allowed_names:
+                return True
     return False
 
 
@@ -464,14 +469,7 @@ def validate_entities(case, context, label):
         return
     names = context_names(context)
     for step in steps:
-        action = step.get("action")
-        relation = step.get("relation")
-        available = {
-            "object": allowed_objects_for(action, names),
-            "location": allowed_locations_for(action, relation, names),
-            "source": names.sources,
-        }
-        for field_name, allowed_names in available.items():
+        for field_name, allowed_names in allowed_names_for_step(step, names).items():
             value = step.get(field_name)
             values = value if isinstance(value, list) else [value]
             missing = [name for name in values if name and name not in allowed_names]

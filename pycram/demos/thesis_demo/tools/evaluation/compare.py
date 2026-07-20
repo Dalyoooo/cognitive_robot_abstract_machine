@@ -6,11 +6,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT), str(ROOT / "notebooks")]
 
 from .report import (  # noqa: E402
-    _check_results,
-    _read_csv,
-    _write_csv,
-    _write_latex,
     build_main_metrics,
+    check_results,
+    read_csv,
+    write_csv,
+    write_latex,
 )
 
 COMPARISON_COLUMNS = ("metric", "base", "finetuned", "difference_pp", "denominator")
@@ -58,15 +58,15 @@ def main():
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
 
-    base_rows = _read_csv(args.base)
-    finetuned_rows = _read_csv(args.finetuned)
-    _check_results(base_rows)
-    _check_results(finetuned_rows)
+    base_rows = read_csv(args.base)
+    finetuned_rows = read_csv(args.finetuned)
+    check_results(base_rows)
+    check_results(finetuned_rows)
 
     table = build_comparison(base_rows, finetuned_rows)
     paths = (
-        _write_csv(args.output_dir / "comparison.csv", table, COMPARISON_COLUMNS),
-        _write_latex(
+        write_csv(args.output_dir / "comparison.csv", table, COMPARISON_COLUMNS),
+        write_latex(
             args.output_dir / "tables" / "comparison.tex", table, COMPARISON_COLUMNS
         ),
     )

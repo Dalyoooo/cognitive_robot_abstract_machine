@@ -12,29 +12,36 @@ import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.colors import BoundaryNorm, ListedColormap  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 
+from .scoring import MAIN_METRICS as SCORING_MAIN_METRICS  # noqa: E402
+
 # Table A: metric, table label, and denominator description. Every metric is
 # rated over the cases where it was observed (non-empty CSV cell), which gives
 # each conditional metric its own denominator.
-MAIN_METRICS = (
-    ("json_valid", "Exact JSON response", "all planned cases"),
-    ("schema_valid", "Schema valid", "all planned cases"),
-    ("guard_valid", "Guard valid", "all planned cases"),
-    ("planner_success", "Planner response success", "all planned cases"),
-    ("grounding_success", "Grounding success", "submitted plans"),
-    ("execution_success", "Execution success", "submitted plans"),
-    (
-        "postcondition_success",
+# Presentation only: scoring.MAIN_METRICS owns which metrics exist, so the two
+# lists cannot drift apart. A metric added there without a label fails loudly.
+METRIC_PRESENTATION = {
+    "json_valid": ("Exact JSON response", "all planned cases"),
+    "schema_valid": ("Schema valid", "all planned cases"),
+    "guard_valid": ("Guard valid", "all planned cases"),
+    "planner_success": ("Planner response success", "all planned cases"),
+    "grounding_success": ("Grounding success", "submitted plans"),
+    "execution_success": ("Execution success", "submitted plans"),
+    "postcondition_success": (
         "Postcondition success",
         "cases with symbolic postconditions",
     ),
-    (
-        "physical_goal_success",
+    "physical_goal_success": (
         "Physical goal success",
         "cases with physical observations",
     ),
-    ("goal_success", "Goal success", "cases with required goals"),
-    ("task_success", "Task success", "all cases"),
+    "goal_success": ("Goal success", "cases with required goals"),
+    "task_success": ("Task success", "all cases"),
+}
+
+MAIN_METRICS = tuple(
+    (name, *METRIC_PRESENTATION[name]) for name in SCORING_MAIN_METRICS
 )
+
 
 # Table C: one row per first failed stage (RQ5), in pipeline order.
 FAILURE_STAGE_LABELS = {
@@ -117,13 +124,13 @@ def _as_bool(value):
     return None
 
 
-def _read_csv(path):
+def read_csv(path):
     """Read the results CSV as a list of row dicts."""
     with Path(path).open(newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
 
 
-def _check_results(rows):
+def check_results(rows):
     """Reject empty, legacy, or duplicated result rows."""
     if not rows:
         raise ValueError("results CSV contains no cases")
@@ -243,7 +250,7 @@ def build_failed_cases(rows):
     return table
 
 
-def _write_csv(path, rows, columns):
+def write_csv(path, rows, columns):
     """Write a small report table to CSV."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
@@ -268,7 +275,7 @@ def _latex_escape(value):
     return "".join(replacements.get(character, character) for character in str(value))
 
 
-def _write_latex(path, rows, columns):
+def write_latex(path, rows, columns):
     """Write a small LaTeX table."""
     path.parent.mkdir(parents=True, exist_ok=True)
     alignment = "l" + "r" * (len(columns) - 1)
@@ -458,8 +465,8 @@ def generate_report(results_path, output_dir):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    rows = _read_csv(results_path)
-    _check_results(rows)
+    rows = read_csv(results_path)
+    check_results(rows)
 
     metrics = build_main_metrics(rows)
     clarification = build_clarification_table(rows)
@@ -467,21 +474,21 @@ def generate_report(results_path, output_dir):
     failed_cases = build_failed_cases(rows)
 
     paths = [
-        _write_csv(output_dir / "main_metrics.csv", metrics, MAIN_METRICS_COLUMNS),
-        _write_csv(
+        write_csv(output_dir / "main_metrics.csv", metrics, MAIN_METRICS_COLUMNS),
+        write_csv(
             output_dir / "clarification.csv", clarification, CLARIFICATION_COLUMNS
         ),
-        _write_csv(output_dir / "failure_distribution.csv", failures, FAILURE_COLUMNS),
-        _write_csv(output_dir / "failed_cases.csv", failed_cases, FAILED_CASE_COLUMNS),
-        _write_latex(
+        write_csv(output_dir / "failure_distribution.csv", failures, FAILURE_COLUMNS),
+        write_csv(output_dir / "failed_cases.csv", failed_cases, FAILED_CASE_COLUMNS),
+        write_latex(
             output_dir / "tables" / "main_metrics.tex", metrics, MAIN_METRICS_COLUMNS
         ),
-        _write_latex(
+        write_latex(
             output_dir / "tables" / "clarification.tex",
             clarification,
             CLARIFICATION_COLUMNS,
         ),
-        _write_latex(
+        write_latex(
             output_dir / "tables" / "failure_distribution.tex",
             failures,
             FAILURE_COLUMNS,

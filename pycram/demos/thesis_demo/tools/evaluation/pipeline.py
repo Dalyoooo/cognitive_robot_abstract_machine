@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from .scoring import (
     EvaluationConfig,
+    field_matches,
     LiveResult,
     outcome_error,
     plan_quality_metrics,
@@ -247,13 +248,6 @@ def _expected_physical_checks(case):
     return checks
 
 
-def _matches_expected(actual, expected):
-    """Return whether a value matches one or several accepted values."""
-    if isinstance(expected, list):
-        return actual in expected
-    return actual == expected
-
-
 def _directional_result(observations, check):
     """Return the newest matching directional observation."""
     results = observations.get("directional_relations")
@@ -263,7 +257,7 @@ def _directional_result(observations, check):
     for result in reversed(results):
         same_object = result.get("object") == check["object"]
         same_relation = result.get("relation") == check["relation"]
-        same_location = _matches_expected(
+        same_location = field_matches(
             result.get("location"),
             check["location"],
         )
@@ -280,7 +274,7 @@ def _physical_check_result(observations, check):
         if not isinstance(navigation, list) or not navigation:
             return None
         final_navigation = navigation[-1]
-        correct_target = _matches_expected(
+        correct_target = field_matches(
             final_navigation.get("location"),
             check["location"],
         )
@@ -598,6 +592,142 @@ def _verify_goals(result, case, session, executor_result, logger):
         result.failure_stage = "goal_verification"
 
 
+@dataclass
+class _PlanningResult:
+    """What the planning stage hands to execution."""
+
+    payload: object = None
+    final_outcome: str = None
+    error: str = None
+
+
+def _plan_turns(result, case, planner, context, logger):
+    """Run the planner turns for one case and record their quality metrics."""
+    metrics = result.metrics
+    metrics["planning_attempted"] = True
+    outcome, payload, conversation, metadata, latency = _run_planner(
+        planner, case.instruction, context
+    )
+    result.planner_outcome = outcome
+    result.planning_latency_s += latency
+    if metadata.get("raw_response") is not None:
+        result.raw_responses.append(metadata["raw_response"])
+    quality, error = _assess_planner_response(case, outcome, payload, context, metadata)
+    metrics.update(quality)
+    _trace(
+        logger,
+        "planner_complete",
+        case,
+        "planning",
+        outcome=outcome,
+        success=error is None,
+        latency_s=latency,
+    )
+
+    # Confusion-matrix cell for the first response.
+    asked = outcome == "clarification"
+    if case.expected_outcome == "clarification":
+        target_correct = bool(
+            asked
+            and isinstance(payload, str)
+            and _target_matches(payload, case.expected_clarification_targets)
+        )
+        metrics["clarification_target_correct"] = target_correct
+        metrics["clarification_outcome"] = "TP" if target_correct else "FN"
+    else:
+        metrics["clarification_outcome"] = "FP" if asked else "TN"
+
+    # Scripted dialog: answer one clarification with a second user turn.
+    final_outcome = outcome
+    follow_up_case = case.follow_up_case()
+    if error is None and asked and follow_up_case:
+        _trace(logger, "clarification_answered", case, "clarification")
+        final_outcome, payload, conversation, metadata, latency = _run_planner(
+            planner, case.clarification_answer, context, conversation
+        )
+        result.planning_latency_s += latency
+        if metadata.get("raw_response") is not None:
+            result.raw_responses.append(metadata["raw_response"])
+        follow_up_quality, error = _assess_planner_response(
+            follow_up_case, final_outcome, payload, context, metadata
+        )
+        # Both dialog turns must be valid to count as one valid response.
+        for name in (
+            "json_valid",
+            "schema_valid",
+            "guard_valid",
+            "plan_valid",
+            "outcome_match",
+        ):
+            follow_up_quality[name] = bool(quality[name] and follow_up_quality[name])
+        metrics.update(follow_up_quality)
+        _trace(
+            logger,
+            "clarification_follow_up_complete",
+            case,
+            "planning",
+            outcome=final_outcome,
+            success=error is None,
+            latency_s=latency,
+        )
+
+    if error is not None:
+        result.error = error
+        if not metrics["json_valid"]:
+            result.failure_stage = "planner_json"
+        elif not metrics["schema_valid"]:
+            result.failure_stage = "planner_schema"
+        elif not metrics["guard_valid"]:
+            result.failure_stage = "planner_guard"
+        else:
+            result.failure_stage = "planner_mode"
+        return _PlanningResult(payload, final_outcome, error)
+
+    result.planner_success = True
+    metrics["planner_success"] = True
+    return _PlanningResult(payload, final_outcome, None)
+
+
+def _execute(result, case, session, planning, config, stage, logger):
+    """Submit the validated plan and record the executor outcome."""
+    metrics = result.metrics
+    if planning.final_outcome == "clarification":
+        result.execution_status = "not_required"
+        return None
+
+    if not isinstance(planning.payload, dict):
+        result.planner_success = False
+        metrics["planner_success"] = False
+        result.error = f"planner returned non-object payload: {planning.payload!r}"
+        result.failure_stage = "planning"
+        return None
+
+    result.plan = planning.payload
+    stage.enter("execution")
+    metrics["execution_attempted"] = True
+    if config.visualization_delay_s > 0:
+        time.sleep(config.visualization_delay_s)
+    executor_result, latency = _execute_plan(
+        case, session, planning.payload, config, logger
+    )
+    result.execution_latency_s += latency
+    status = executor_result.get("status", "error")
+    executor_phase = executor_result.get("phase")
+    result.execution_status = status
+    metrics["execution_success"] = status == "ok"
+    if status == "ok" or executor_phase in ("execution", "context_refresh"):
+        metrics["grounding_success"] = True
+    elif executor_phase == "grounding":
+        metrics["grounding_success"] = False
+    if status != "ok":
+        result.error = executor_result.get("error")
+        if executor_phase in EXECUTOR_STAGES:
+            result.failure_stage = executor_phase
+        else:
+            result.failure_stage = "execution"
+    return executor_result
+
+
 def _run_case(result, case, planner, session, config, logger):
     """Run the pipeline stages for one case and fill the result in place."""
     metrics = result.metrics
@@ -605,128 +735,15 @@ def _run_case(result, case, planner, session, config, logger):
     try:
         context = _setup_world(case, session, config, logger)
 
-        # Planning: exactly one model response per user turn, no retries.
         stage.enter("planning")
-        metrics["planning_attempted"] = True
-        outcome, payload, conversation, metadata, latency = _run_planner(
-            planner, case.instruction, context
-        )
-        result.planner_outcome = outcome
-        result.planning_latency_s += latency
-        if metadata.get("raw_response") is not None:
-            result.raw_responses.append(metadata["raw_response"])
-        quality, error = _assess_planner_response(
-            case, outcome, payload, context, metadata
-        )
-        metrics.update(quality)
-        _trace(
-            logger,
-            "planner_complete",
-            case,
-            "planning",
-            outcome=outcome,
-            success=error is None,
-            latency_s=latency,
-        )
-
-        # Confusion-matrix cell for the first response.
-        asked = outcome == "clarification"
-        if case.expected_outcome == "clarification":
-            target_correct = bool(
-                asked
-                and isinstance(payload, str)
-                and _target_matches(payload, case.expected_clarification_targets)
-            )
-            metrics["clarification_target_correct"] = target_correct
-            metrics["clarification_outcome"] = "TP" if target_correct else "FN"
-        else:
-            metrics["clarification_outcome"] = "FP" if asked else "TN"
-
-        # Scripted dialog: answer one clarification with a second user turn.
-        final_outcome = outcome
-        follow_up_case = case.follow_up_case()
-        if error is None and asked and follow_up_case:
-            _trace(logger, "clarification_answered", case, "clarification")
-            final_outcome, payload, conversation, metadata, latency = _run_planner(
-                planner, case.clarification_answer, context, conversation
-            )
-            result.planning_latency_s += latency
-            if metadata.get("raw_response") is not None:
-                result.raw_responses.append(metadata["raw_response"])
-            follow_up_quality, error = _assess_planner_response(
-                follow_up_case, final_outcome, payload, context, metadata
-            )
-            # Both dialog turns must be valid to count as one valid response.
-            for name in (
-                "json_valid",
-                "schema_valid",
-                "guard_valid",
-                "plan_valid",
-                "outcome_match",
-            ):
-                follow_up_quality[name] = bool(
-                    quality[name] and follow_up_quality[name]
-                )
-            metrics.update(follow_up_quality)
-            _trace(
-                logger,
-                "clarification_follow_up_complete",
-                case,
-                "planning",
-                outcome=final_outcome,
-                success=error is None,
-                latency_s=latency,
-            )
-
-        if error is not None:
-            result.error = error
-            if not metrics["json_valid"]:
-                result.failure_stage = "planner_json"
-            elif not metrics["schema_valid"]:
-                result.failure_stage = "planner_schema"
-            elif not metrics["guard_valid"]:
-                result.failure_stage = "planner_guard"
-            else:
-                result.failure_stage = "planner_mode"
+        planning = _plan_turns(result, case, planner, context, logger)
+        if planning.error is not None:
             return
 
-        result.planner_success = True
-        metrics["planner_success"] = True
-
-        # Execution: submit the validated plan to the executor process.
-        executor_result = None
-        if final_outcome == "clarification":
-            result.execution_status = "not_required"
-        elif isinstance(payload, dict):
-            result.plan = payload
-            stage.enter("execution")
-            metrics["execution_attempted"] = True
-            if config.visualization_delay_s > 0:
-                time.sleep(config.visualization_delay_s)
-            executor_result, latency = _execute_plan(
-                case, session, payload, config, logger
-            )
-            result.execution_latency_s += latency
-            status = executor_result.get("status", "error")
-            executor_phase = executor_result.get("phase")
-            result.execution_status = status
-            metrics["execution_success"] = status == "ok"
-            if status == "ok" or executor_phase in ("execution", "context_refresh"):
-                metrics["grounding_success"] = True
-            elif executor_phase == "grounding":
-                metrics["grounding_success"] = False
-            if status != "ok":
-                result.error = executor_result.get("error")
-                if executor_phase in EXECUTOR_STAGES:
-                    result.failure_stage = executor_phase
-                else:
-                    result.failure_stage = "execution"
-                return
-        else:
-            result.planner_success = False
-            metrics["planner_success"] = False
-            result.error = f"planner returned non-object payload: {payload!r}"
-            result.failure_stage = "planning"
+        executor_result = _execute(
+            result, case, session, planning, config, stage, logger
+        )
+        if result.failure_stage is not None:
             return
 
         # Goal verification: compare the final world state with the case goals.
@@ -734,8 +751,11 @@ def _run_case(result, case, planner, session, config, logger):
             stage.enter("goal_verification")
             _verify_goals(result, case, session, executor_result, logger)
 
-        # A clarification with the wrong target fails the case.
-        if metrics["clarification_target_correct"] is False and result.error is None:
+        clarification_missed_target = (
+            metrics["clarification_target_correct"] is False
+        )
+        first_failure_unrecorded = result.error is None
+        if clarification_missed_target and first_failure_unrecorded:
             result.error = "clarification question did not match the expected target"
             result.failure_stage = "planner_mode"
 
@@ -749,7 +769,11 @@ def _run_case(result, case, planner, session, config, logger):
         )
         if case.clarification_answer:
             metrics["dialog_resolution_success"] = result.task_success
-        if not result.task_success and result.failure_stage is None:
+
+        failed_without_a_stage = (
+            not result.task_success and result.failure_stage is None
+        )
+        if failed_without_a_stage:
             result.failure_stage = "goal_verification"
             result.error = result.error or "required goals could not be confirmed"
     except Exception as exc:

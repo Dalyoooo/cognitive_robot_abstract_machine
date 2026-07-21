@@ -5,20 +5,15 @@ from pathlib import Path
 
 import matplotlib
 
-# Agg backend: evaluation runs headless; must precede the pyplot import.
 matplotlib.use("Agg", force=True)
 
-import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib.colors import BoundaryNorm, ListedColormap  # noqa: E402
-from matplotlib.patches import Patch  # noqa: E402
+import matplotlib.pyplot as plt
+from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.patches import Patch
 
-from .scoring import MAIN_METRICS as SCORING_MAIN_METRICS  # noqa: E402
+from .scoring import MAIN_METRICS as SCORING_MAIN_METRICS
+from .scoring import confusion_rates
 
-# Table A: metric, table label, and denominator description. Every metric is
-# rated over the cases where it was observed (non-empty CSV cell), which gives
-# each conditional metric its own denominator.
-# Presentation only: scoring.MAIN_METRICS owns which metrics exist, so the two
-# lists cannot drift apart. A metric added there without a label fails loudly.
 METRIC_PRESENTATION = {
     "json_valid": ("Exact JSON response", "all planned cases"),
     "schema_valid": ("Schema valid", "all planned cases"),
@@ -43,7 +38,6 @@ MAIN_METRICS = tuple(
 )
 
 
-# Table C: one row per first failed stage (RQ5), in pipeline order.
 FAILURE_STAGE_LABELS = {
     "planner_json": "Planner JSON",
     "planner_schema": "Planner schema",
@@ -71,26 +65,6 @@ FAILED_CASE_COLUMNS = (
     "error",
 )
 
-COLUMN_LABELS = {
-    "metric": "Metric",
-    "successes": "Successes",
-    "cases": "Cases",
-    "percent": "Percent",
-    "denominator": "Denominator",
-    "value": "Value",
-    "failed_stage": "First failed stage",
-    "count": "Count",
-    "share_of_failures_percent": "Share of failures (%)",
-    "case_id": "Case ID",
-    "planner_outcome": "Planner outcome",
-    "execution_status": "Execution status",
-    "error": "Error",
-    "base": "Base",
-    "finetuned": "Fine-tuned",
-    "difference_pp": "Difference (pp)",
-}
-
-# Stages shown in the case-stage heatmap, in pipeline order.
 HEATMAP_FIELDS = (
     "json_valid",
     "schema_valid",
@@ -115,7 +89,6 @@ HEATMAP_LABELS = {
 
 
 def _as_bool(value):
-    """Parse one CSV cell as True, False, or None when it was not observed."""
     text = str(value if value is not None else "").strip().casefold()
     if text in {"true", "1"}:
         return True
@@ -125,13 +98,11 @@ def _as_bool(value):
 
 
 def read_csv(path):
-    """Read the results CSV as a list of row dicts."""
     with Path(path).open(newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
 
 
 def check_results(rows):
-    """Reject empty, legacy, or duplicated result rows."""
     if not rows:
         raise ValueError("results CSV contains no cases")
     required = {"id", "task_success", "failure_stage", "clarification_outcome"}
@@ -147,7 +118,6 @@ def check_results(rows):
 
 
 def build_main_metrics(rows):
-    """Build Table A: one row per main metric with its own denominator."""
     table = []
     for name, label, denominator in MAIN_METRICS:
         values = [_as_bool(row.get(name)) for row in rows]
@@ -167,7 +137,6 @@ def build_main_metrics(rows):
 
 
 def build_clarification_table(rows):
-    """Build Table B: the first-response clarification confusion matrix."""
     outcomes = Counter(
         str(row.get("clarification_outcome", "")).strip() for row in rows
     )
@@ -175,11 +144,10 @@ def build_clarification_table(rows):
     fp = outcomes.get("FP", 0)
     fn = outcomes.get("FN", 0)
     tn = outcomes.get("TN", 0)
+    precision, recall, f1 = confusion_rates(tp, fp, fn, tn)
 
-    def _percent(numerator, denominator):
-        if not denominator:
-            return "n/a"
-        return f"{100.0 * numerator / denominator:.1f}%"
+    def _percent(value):
+        return "n/a" if value is None else f"{100.0 * value:.1f}%"
 
     scripted = [row for row in rows if str(row.get("clarification_answer", "")).strip()]
     scripted_ok = sum(
@@ -190,9 +158,9 @@ def build_clarification_table(rows):
         {"metric": "False positives", "value": fp},
         {"metric": "False negatives", "value": fn},
         {"metric": "True negatives", "value": tn},
-        {"metric": "Precision", "value": _percent(tp, tp + fp)},
-        {"metric": "Recall", "value": _percent(tp, tp + fn)},
-        {"metric": "F1 score", "value": _percent(2 * tp, 2 * tp + fp + fn)},
+        {"metric": "Precision", "value": _percent(precision)},
+        {"metric": "Recall", "value": _percent(recall)},
+        {"metric": "F1 score", "value": _percent(f1)},
         {
             "metric": "Scripted follow-up success",
             "value": f"{scripted_ok}/{len(scripted)}" if scripted else "n/a",
@@ -201,7 +169,6 @@ def build_clarification_table(rows):
 
 
 def build_failure_distribution(rows):
-    """Build Table C: how many failed cases first failed at each stage."""
     failed = [row for row in rows if _as_bool(row.get("task_success")) is False]
     stages = []
     for row in failed:
@@ -229,7 +196,6 @@ def build_failure_distribution(rows):
 
 
 def build_failed_cases(rows):
-    """List every failed case with its first failed stage for the appendix."""
     table = []
     for row in rows:
         if _as_bool(row.get("task_success")) is not False:
@@ -251,7 +217,6 @@ def build_failed_cases(rows):
 
 
 def write_csv(path, rows, columns):
-    """Write a small report table to CSV."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns)
@@ -260,44 +225,7 @@ def write_csv(path, rows, columns):
     return path
 
 
-def _latex_escape(value):
-    """Escape characters with a special meaning in LaTeX."""
-    replacements = {
-        "\\": r"\textbackslash{}",
-        "&": r"\&",
-        "%": r"\%",
-        "$": r"\$",
-        "#": r"\#",
-        "_": r"\_",
-        "{": r"\{",
-        "}": r"\}",
-    }
-    return "".join(replacements.get(character, character) for character in str(value))
-
-
-def write_latex(path, rows, columns):
-    """Write a small LaTeX table."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    alignment = "l" + "r" * (len(columns) - 1)
-    header = " & ".join(
-        _latex_escape(COLUMN_LABELS.get(column, column)) for column in columns
-    )
-    lines = [
-        f"\\begin{{tabular}}{{{alignment}}}",
-        r"\hline",
-        header + r" \\",
-        r"\hline",
-    ]
-    for row in rows:
-        cells = [_latex_escape(row.get(column, "")) for column in columns]
-        lines.append(" & ".join(cells) + r" \\")
-    lines.extend((r"\hline", r"\end{tabular}"))
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return path
-
-
 def _save_figure(figure, output_dir, name):
-    """Save one plot as PNG and PDF."""
     output_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for extension in ("png", "pdf"):
@@ -311,14 +239,12 @@ def _save_figure(figure, output_dir, name):
 
 
 def _show_empty_plot(axis, title, message):
-    """Show a clear message when a plot has no data."""
     axis.set_title(title)
     axis.text(0.5, 0.5, message, ha="center", va="center")
     axis.set_axis_off()
 
 
 def plot_main_metrics(rows, output_dir):
-    """Plot the main pipeline success rates."""
     metrics = [row for row in build_main_metrics(rows) if row["cases"]]
     figure_height = max(4.0, 0.45 * len(metrics) + 1.8)
     figure, axis = plt.subplots(figsize=(9.0, figure_height))
@@ -351,7 +277,6 @@ def plot_main_metrics(rows, output_dir):
 
 
 def plot_failure_distribution(rows, output_dir):
-    """Plot how failed cases are distributed across pipeline stages."""
     failures = build_failure_distribution(rows)
     figure_height = max(3.5, 0.5 * len(failures) + 1.8)
     figure, axis = plt.subplots(figsize=(9.0, figure_height))
@@ -386,7 +311,6 @@ def plot_failure_distribution(rows, output_dir):
 
 
 def build_case_stage_matrix(rows):
-    """Return case labels and Pass, Fail, or unevaluated stage values."""
     case_labels = []
     matrix = []
     for row in rows:
@@ -405,7 +329,6 @@ def build_case_stage_matrix(rows):
 
 
 def plot_case_stage_heatmap(rows, output_dir):
-    """Plot Pass, Fail, and unevaluated stages for every case."""
     case_labels, matrix = build_case_stage_matrix(rows)
     figure_height = max(4.5, 0.28 * len(case_labels) + 2.2)
     figure, axis = plt.subplots(figsize=(11.0, figure_height))
@@ -449,7 +372,6 @@ def plot_case_stage_heatmap(rows, output_dir):
 
 
 def generate_plots(rows, output_dir):
-    """Generate the three evaluation plots."""
     paths = []
     for plot_function in (
         plot_main_metrics,
@@ -461,7 +383,6 @@ def generate_plots(rows, output_dir):
 
 
 def generate_report(results_path, output_dir):
-    """Generate the thesis tables (A, B, C), the failed-case list, and plots."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -480,26 +401,12 @@ def generate_report(results_path, output_dir):
         ),
         write_csv(output_dir / "failure_distribution.csv", failures, FAILURE_COLUMNS),
         write_csv(output_dir / "failed_cases.csv", failed_cases, FAILED_CASE_COLUMNS),
-        write_latex(
-            output_dir / "tables" / "main_metrics.tex", metrics, MAIN_METRICS_COLUMNS
-        ),
-        write_latex(
-            output_dir / "tables" / "clarification.tex",
-            clarification,
-            CLARIFICATION_COLUMNS,
-        ),
-        write_latex(
-            output_dir / "tables" / "failure_distribution.tex",
-            failures,
-            FAILURE_COLUMNS,
-        ),
     ]
     paths.extend(generate_plots(rows, output_dir / "plots"))
     return tuple(paths)
 
 
 def main():
-    """Run the report generator from the command line."""
     parser = argparse.ArgumentParser(
         description="Create the thesis report tables from evaluation results."
     )

@@ -1,10 +1,9 @@
 import json
-import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Mapping
 
-from .domain import unique
+from .domain import normalise_words, unique
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_CATALOG_PATH = PACKAGE_DIR / "assets" / "catalog.json"
@@ -17,7 +16,7 @@ class CatalogSchemaError(Exception):
 
 
 def _normalise_label(value):
-    return " ".join(re.findall(r"[a-z0-9]+", value.casefold()))
+    return " ".join(normalise_words(value))
 
 
 @dataclass(frozen=True)
@@ -37,31 +36,14 @@ class TypeSpec:
     @classmethod
     def from_dict(cls, value):
         return cls(
-            name=str(value["name"]),
-            natural_label=str(value["natural_label"]),
-            aliases=tuple(str(item) for item in value.get("aliases", ())),
-            parents=tuple(str(item) for item in value.get("parents", ())),
-            ancestors=tuple(str(item) for item in value.get("ancestors", ())),
-            capabilities=tuple(str(item) for item in value.get("capabilities", ())),
-            role=value.get("role"),
-            sampleable=bool(value.get("sampleable", True)),
-            requires_open_close=bool(value.get("requires_open_close", False)),
-            can_store_objects=bool(value.get("can_store_objects", False)),
+            **{
+                key: tuple(items) if isinstance(items, list) else items
+                for key, items in value.items()
+            }
         )
 
     def to_dict(self):
-        return {
-            "name": self.name,
-            "natural_label": self.natural_label,
-            "aliases": list(self.aliases),
-            "parents": list(self.parents),
-            "ancestors": list(self.ancestors),
-            "capabilities": list(self.capabilities),
-            "role": self.role,
-            "sampleable": self.sampleable,
-            "requires_open_close": self.requires_open_close,
-            "can_store_objects": self.can_store_objects,
-        }
+        return asdict(self)
 
 
 @dataclass(frozen=True)

@@ -37,7 +37,6 @@ def create_log(path):
 
 
 def log_event(logger, event, payload, level=logging.INFO):
-    """Write one structured and immediately flushed log event."""
     logger.log(
         level,
         "%s %s",
@@ -47,7 +46,6 @@ def log_event(logger, event, payload, level=logging.INFO):
 
 
 def log_exception(logger, event, payload):
-    """Write a structured event together with the active exception traceback."""
     logger.exception(
         "%s %s",
         event,
@@ -56,7 +54,6 @@ def log_exception(logger, event, payload):
 
 
 def _trace(logger, event, case, phase, **details):
-    """Write one case event when evaluation logging is enabled."""
     if logger is not None:
         log_event(
             logger,
@@ -66,7 +63,6 @@ def _trace(logger, event, case, phase, **details):
 
 
 def wait(read, ready, timeout_s, poll_interval_s):
-    """Poll a value until it is ready or the timeout expires."""
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         value = read()
@@ -77,8 +73,6 @@ def wait(read, ready, timeout_s, poll_interval_s):
 
 
 def wait_for_world(session, config):
-    """Wait for a session world to become ready."""
-
     def world_ready():
         result = session.execution_result()
         if result and result.get("status") == "error":
@@ -89,7 +83,6 @@ def wait_for_world(session, config):
 
 
 def _empty_metrics():
-    """Return the per-case metric fields with their pre-run defaults."""
     return {
         "planning_attempted": False,
         "execution_attempted": False,
@@ -126,17 +119,39 @@ def _empty_metrics():
 
 
 def _final_location_goals(case):
-    """Return the last expected location for each object.
-
-    A reference can contain intermediate moves. Only the last destination is a
-    final-state postcondition.
-    """
     goals_by_object = {}
     for goal in case.goals():
         object_name = goal.get("object")
         if object_name and goal.get("location"):
             goals_by_object[object_name] = goal
     return list(goals_by_object.values())
+
+
+@dataclass
+class GoalChecks:
+    """Required goal checks and their observed outcomes."""
+
+    success: bool | None = None
+    count: int = 0
+    checked_count: int = 0
+    errors: list = field(default_factory=list)
+    unavailable: list = field(default_factory=list)
+
+    def record_checked(self, error=None):
+        """Record one observed check, plus its failure when it did not pass."""
+        self.checked_count += 1
+        if error is not None:
+            self.errors.append(error)
+
+    def as_metrics(self, prefix):
+        """Return the checks under their results.csv column names."""
+        return {
+            f"{prefix}success": self.success,
+            f"{prefix}count": self.count,
+            f"{prefix}checked_count": self.checked_count,
+            f"{prefix}errors": self.errors,
+            f"{prefix}unavailable": self.unavailable,
+        }
 
 
 def postcondition_metrics(case, final_context=None):
@@ -149,13 +164,7 @@ def postcondition_metrics(case, final_context=None):
         final_context = load_context()
 
     goals = _final_location_goals(case)
-    metrics = {
-        "postcondition_success": None,
-        "postcondition_goal_count": len(goals),
-        "postcondition_checked_count": 0,
-        "postcondition_errors": [],
-        "postcondition_unavailable": [],
-    }
+    checks = GoalChecks(count=len(goals))
     locations = final_context.get("object_locations")
 
     for goal in goals:
@@ -164,32 +173,34 @@ def postcondition_metrics(case, final_context=None):
         relation = goal.get("relation")
 
         if relation in DIRECTIONAL_RELATIONS:
-            metrics["postcondition_unavailable"].append(
+            checks.unavailable.append(
                 f"{object_name!r}: exact {relation!r} is not stored in world_context"
             )
             continue
         if not isinstance(locations, dict) or not locations.get(object_name):
-            metrics["postcondition_unavailable"].append(
+            checks.unavailable.append(
                 f"{object_name!r}: final location is not available in world_context"
             )
             continue
 
         actual = locations[object_name]
         expected = location if isinstance(location, list) else [location]
-        metrics["postcondition_checked_count"] += 1
+        error = None
         if not set(actual).intersection(expected):
-            metrics["postcondition_errors"].append(
+            error = (
                 f"postcondition failed: {object_name!r} is at {actual!r}, "
                 f"expected one of {expected!r}"
             )
+        checks.record_checked(error)
 
-    if metrics["postcondition_checked_count"]:
-        metrics["postcondition_success"] = not metrics["postcondition_errors"]
+    if checks.checked_count:
+        checks.success = not checks.errors
+    metrics = checks.as_metrics("postcondition_")
+    metrics["postcondition_goal_count"] = metrics.pop("postcondition_count")
     return metrics
 
 
 def _expected_physical_checks(case):
-    """Build physical checks from the benchmark goals."""
     goals = case.goals()
     if not goals:
         return []
@@ -249,7 +260,6 @@ def _expected_physical_checks(case):
 
 
 def _directional_result(observations, check):
-    """Return the newest matching directional observation."""
     results = observations.get("directional_relations")
     if not isinstance(results, list):
         return None
@@ -267,7 +277,6 @@ def _directional_result(observations, check):
 
 
 def _physical_check_result(observations, check):
-    """Return one physical check result, or None when it is unavailable."""
     check_type = check["type"]
     if check_type == "navigation":
         navigation = observations.get("navigation")
@@ -307,7 +316,6 @@ def _physical_check_result(observations, check):
 
 
 def _physical_check_name(check):
-    """Return a short readable name for one physical check."""
     check_type = check["type"]
     if check_type == "navigation":
         return f"final navigation to {check['location']!r}"
@@ -321,77 +329,56 @@ def _physical_check_name(check):
 
 
 def physical_goal_metrics(case, observations):
-    """Check goals that are absent from the serialized world context."""
-    checks = _expected_physical_checks(case)
-    metrics = {
-        "physical_goal_success": None,
-        "physical_goal_count": len(checks),
-        "physical_goal_checked_count": 0,
-        "physical_goal_errors": [],
-        "physical_goal_unavailable": [],
-    }
-    if not checks:
-        return metrics
+    expected_checks = _expected_physical_checks(case)
+    checks = GoalChecks(count=len(expected_checks))
+    if not expected_checks:
+        return checks.as_metrics("physical_goal_")
 
     observations = observations if isinstance(observations, dict) else {}
-    for check in checks:
+    for check in expected_checks:
         check_name = _physical_check_name(check)
         result = _physical_check_result(observations, check)
         if result is None:
-            metrics["physical_goal_unavailable"].append(
-                f"physical observation unavailable: {check_name}"
-            )
+            checks.unavailable.append(f"physical observation unavailable: {check_name}")
             continue
+        error = None if result else f"physical goal failed: {check_name}"
+        checks.record_checked(error)
 
-        metrics["physical_goal_checked_count"] += 1
-        if not result:
-            metrics["physical_goal_errors"].append(
-                f"physical goal failed: {check_name}"
-            )
-
-    metrics["physical_goal_success"] = bool(
-        metrics["physical_goal_checked_count"] == len(checks)
-        and not metrics["physical_goal_errors"]
-    )
-    return metrics
+    checks.success = bool(checks.checked_count == checks.count and not checks.errors)
+    return checks.as_metrics("physical_goal_")
 
 
 def combined_goal_metrics(case, postconditions, physical_goals):
-    """Combine serialized locations and direct physical observations."""
     observable_locations = [
         goal
         for goal in _final_location_goals(case)
         if goal.get("relation") not in DIRECTIONAL_RELATIONS
     ]
-    total = len(observable_locations) + physical_goals["physical_goal_count"]
-    checked = (
-        postconditions["postcondition_checked_count"]
-        + physical_goals["physical_goal_checked_count"]
+    checks = GoalChecks(
+        count=len(observable_locations) + physical_goals["physical_goal_count"],
+        checked_count=(
+            postconditions["postcondition_checked_count"]
+            + physical_goals["physical_goal_checked_count"]
+        ),
+        errors=(
+            postconditions["postcondition_errors"]
+            + physical_goals["physical_goal_errors"]
+        ),
+        unavailable=list(physical_goals["physical_goal_unavailable"]),
     )
-    errors = (
-        postconditions["postcondition_errors"] + physical_goals["physical_goal_errors"]
-    )
-    unavailable = list(physical_goals["physical_goal_unavailable"])
     missing_locations = (
         len(observable_locations) - postconditions["postcondition_checked_count"]
     )
     if missing_locations > 0:
-        unavailable.append(
+        checks.unavailable.append(
             f"{missing_locations} final object location observation(s) unavailable"
         )
 
-    if not total:
-        success = None
-    else:
-        success = bool(checked == total and not errors)
-
-    return {
-        "goal_success": success,
-        "goal_count": total,
-        "goal_checked_count": checked,
-        "goal_errors": errors,
-        "goal_unavailable": unavailable,
-    }
+    if checks.count:
+        checks.success = bool(
+            checks.checked_count == checks.count and not checks.errors
+        )
+    return checks.as_metrics("goal_")
 
 
 def task_succeeded(
@@ -402,7 +389,6 @@ def task_succeeded(
     reference_goal_match=None,
     clarification_target_correct=None,
 ):
-    """Return whether the required task goal was successfully completed."""
     if not planner_success:
         return False
     if case.expected_outcome == "clarification":
@@ -418,7 +404,6 @@ def task_succeeded(
 
 
 def _run_planner(planner, instruction, context, conversation=None):
-    """Run one planner turn and return its result, metadata, and latency."""
     started = time.perf_counter()
     outcome, payload, history = planner.plan(
         instruction,
@@ -431,8 +416,7 @@ def _run_planner(planner, instruction, context, conversation=None):
 
 
 def _assess_planner_response(case, outcome, payload, context, metadata):
-    """Validate one planner response and return its quality and error."""
-    error = outcome_error(case, outcome, payload)
+    error = outcome_error(case, outcome)
     if outcome == "error":
         rejection_reason = metadata.get("rejection_reason")
         if not rejection_reason and isinstance(payload, str):
@@ -446,7 +430,6 @@ def _assess_planner_response(case, outcome, payload, context, metadata):
 
 
 def _target_matches(question, targets):
-    """Match a clarification question against explicit benchmark target terms."""
     words = re.findall(r"[a-z0-9]+", question.casefold())
     padded_question = f" {' '.join(words)} "
     for target in targets:
@@ -458,7 +441,6 @@ def _target_matches(question, targets):
 
 
 def _execute_plan(case, session, payload, config, logger):
-    """Submit one plan, wait for its result, and trace execution."""
     _trace(
         logger,
         "execution_start",
@@ -486,62 +468,54 @@ def _execute_plan(case, session, payload, config, logger):
     return result, latency
 
 
-def evaluate_case(case, planner, session, config=EvaluationConfig(), logger=None):
-    """Plan and execute one case in a fresh world.
+def _stop_world_logged(case, session, logger):
+    try:
+        session.stop_world()
+    except Exception as exc:
+        if logger is not None:
+            log_exception(
+                logger,
+                "case_exception",
+                {
+                    "case_id": case.id,
+                    "phase": "teardown",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+        raise
+    _trace(logger, "world_stopped", case, "teardown")
 
-    The returned result carries ``failure_stage``: the first pipeline stage
-    that failed, or ``None`` when the case succeeded.
-    """
+
+def evaluate_case(case, planner, session, config=EvaluationConfig(), logger=None):
     started = time.perf_counter()
     result = LiveResult(case=case, metrics=_empty_metrics())
     try:
         _run_case(result, case, planner, session, config, logger)
     finally:
-        try:
-            session.stop_world()
-        except Exception as exc:
-            if logger is not None:
-                log_exception(
-                    logger,
-                    "case_exception",
-                    {
-                        "case_id": case.id,
-                        "phase": "teardown",
-                        "error_type": type(exc).__name__,
-                        "error": str(exc),
-                    },
-                )
-            raise
-        else:
-            _trace(logger, "world_stopped", case, "teardown")
+        _stop_world_logged(case, session, logger)
     result.total_latency_s = time.perf_counter() - started
     return result
 
 
 @dataclass
 class _CaseStage:
-    """Track the running pipeline stage so failures are attributed correctly."""
-
     name: str = "world_setup"
     started: float = field(default_factory=time.perf_counter)
 
     def enter(self, name):
-        """Begin a new stage and restart its latency clock."""
         self.name = name
         self.started = time.perf_counter()
 
     def elapsed(self):
-        """Return seconds spent in the current stage."""
         return time.perf_counter() - self.started
 
 
 def world_context(session):
-    """Project the live demo world into the planner context."""
     return session.context()
 
 
 def _setup_world(case, session, config, logger):
-    """Build a fresh CRAM world for the case and return its planner context."""
     session.setup_world(case.robot, case.environment)
     wait_for_world(session, config)
     context = world_context(session)
@@ -559,7 +533,6 @@ def _setup_world(case, session, config, logger):
 
 
 def _verify_goals(result, case, session, executor_result, logger):
-    """Compare the final world state with the case goals and record the outcome."""
     metrics = result.metrics
     postconditions = postcondition_metrics(case, world_context(session))
     physical_goals = physical_goal_metrics(case, executor_result.get("observations"))
@@ -594,15 +567,12 @@ def _verify_goals(result, case, session, executor_result, logger):
 
 @dataclass
 class _PlanningResult:
-    """What the planning stage hands to execution."""
-
     payload: object = None
     final_outcome: str = None
     error: str = None
 
 
 def _plan_turns(result, case, planner, context, logger):
-    """Run the planner turns for one case and record their quality metrics."""
     metrics = result.metrics
     metrics["planning_attempted"] = True
     outcome, payload, conversation, metadata, latency = _run_planner(
@@ -689,7 +659,6 @@ def _plan_turns(result, case, planner, context, logger):
 
 
 def _execute(result, case, session, planning, config, stage, logger):
-    """Submit the validated plan and record the executor outcome."""
     metrics = result.metrics
     if planning.final_outcome == "clarification":
         result.execution_status = "not_required"
@@ -729,7 +698,6 @@ def _execute(result, case, session, planning, config, stage, logger):
 
 
 def _run_case(result, case, planner, session, config, logger):
-    """Run the pipeline stages for one case and fill the result in place."""
     metrics = result.metrics
     stage = _CaseStage()
     try:
@@ -751,9 +719,7 @@ def _run_case(result, case, planner, session, config, logger):
             stage.enter("goal_verification")
             _verify_goals(result, case, session, executor_result, logger)
 
-        clarification_missed_target = (
-            metrics["clarification_target_correct"] is False
-        )
+        clarification_missed_target = metrics["clarification_target_correct"] is False
         first_failure_unrecorded = result.error is None
         if clarification_missed_target and first_failure_unrecorded:
             result.error = "clarification question did not match the expected target"
@@ -803,7 +769,6 @@ def _run_case(result, case, planner, session, config, logger):
 
 
 def validate_demo_world(cases, session, config):
-    """Check all cases against one live Kitchen context."""
     try:
         session.setup_world("hsrb", "kitchen")
         wait_for_world(session, config)

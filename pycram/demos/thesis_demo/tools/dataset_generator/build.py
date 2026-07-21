@@ -271,13 +271,14 @@ def _context_pair(scenario, example, rendered, catalog):
 
 
 def generate_base_examples(composer, sampler, catalog, *, per_family, seed):
-    work = []
-    for family in FAMILIES:
-        for family_index in range(per_family):
-            work.append((family, family_index))
     scenarios = []
     examples = []
     rendered_rows = []
+    work = (
+        (family, family_index)
+        for family in FAMILIES
+        for family_index in range(per_family)
+    )
     for serial, (family, family_index) in enumerate(work):
         scenario, example, rendered = _generate_example(
             composer,
@@ -376,15 +377,14 @@ def write_dataset(
     )
     _write_jsonl(output_dir / "scenarios.jsonl", map(_scenario_row, scenarios))
 
-    review = []
-    for family in FAMILIES:
-        row = None
-        for item in all_examples:
-            if item.family == family:
-                row = item
-                break
-        if row is not None:
-            review.append(_training_row(row, "review"))
+    first_by_family = {}
+    for item in all_examples:
+        first_by_family.setdefault(item.family, item)
+    review = [
+        _training_row(first_by_family[family], "review")
+        for family in FAMILIES
+        if family in first_by_family
+    ]
     _write_jsonl(output_dir / "review.jsonl", review)
 
     manifest = {

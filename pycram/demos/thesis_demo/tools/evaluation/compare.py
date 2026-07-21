@@ -1,30 +1,18 @@
 import argparse
-import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path[:0] = [str(ROOT), str(ROOT / "notebooks")]
-
-from .report import (  # noqa: E402
-    build_main_metrics,
-    check_results,
-    read_csv,
-    write_csv,
-    write_latex,
-)
+from .report import build_main_metrics, check_results, read_csv, write_csv
 
 COMPARISON_COLUMNS = ("metric", "base", "finetuned", "difference_pp", "denominator")
 
 
 def _format_rate(row):
-    """Format one Table A row as "successes/cases (percent%)"."""
     if not row["cases"]:
         return "n/a"
     return f"{row['successes']}/{row['cases']} ({row['percent']:.1f}%)"
 
 
 def build_comparison(base_rows, finetuned_rows):
-    """Combine two Table A results into one comparison table."""
     base_metrics = build_main_metrics(base_rows)
     finetuned_metrics = build_main_metrics(finetuned_rows)
 
@@ -47,7 +35,6 @@ def build_comparison(base_rows, finetuned_rows):
 
 
 def main():
-    """Write the base vs fine-tuned comparison table."""
     parser = argparse.ArgumentParser(
         description="Compare a base and a fine-tuned evaluation run."
     )
@@ -64,13 +51,8 @@ def main():
     check_results(finetuned_rows)
 
     table = build_comparison(base_rows, finetuned_rows)
-    paths = (
-        write_csv(args.output_dir / "comparison.csv", table, COMPARISON_COLUMNS),
-        write_latex(
-            args.output_dir / "tables" / "comparison.tex", table, COMPARISON_COLUMNS
-        ),
-    )
-    print("Wrote " + ", ".join(map(str, paths)))
+    path = write_csv(args.output_dir / "comparison.csv", table, COMPARISON_COLUMNS)
+    print(f"Wrote {path}")
     return 0
 
 

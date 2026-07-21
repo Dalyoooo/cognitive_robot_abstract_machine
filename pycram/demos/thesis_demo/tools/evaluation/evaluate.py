@@ -10,8 +10,6 @@ from pathlib import Path
 
 import llama_cpp
 
-# Generated datasets stay binder-side build artifacts (Phase 4b item 5), so the
-# benchmark/training overlap check needs an explicit path to that checkout.
 ROOT = Path(
     os.environ.get(
         "NLP_DATASET_ROOT",
@@ -39,7 +37,6 @@ from .scoring import (
 
 
 def write_outputs(results, output_dir):
-    """Write cumulative raw JSON and CSV results."""
     output_dir.mkdir(parents=True, exist_ok=True)
     paths = (
         output_dir / "results.json",
@@ -50,11 +47,7 @@ def write_outputs(results, output_dir):
     }
     paths[0].write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     rows = [result.to_row() for result in results]
-    columns = []
-    for row in rows:
-        for column in row:
-            if column not in columns:
-                columns.append(column)
+    columns = list(dict.fromkeys(column for row in rows for column in row))
     with paths[1].open("w", newline="", encoding="utf-8") as handle:
         if columns:
             writer = csv.DictWriter(handle, fieldnames=columns)
@@ -95,7 +88,6 @@ def _parser():
 
 
 def _select_cases(parser, args):
-    """Load and filter benchmark cases from CLI arguments."""
     cases = load_cases(args.cases)
     if args.case_id:
         selected = set(args.case_id)
@@ -111,27 +103,19 @@ def _select_cases(parser, args):
 
 
 def _format_generated_plan(result):
-    """Return one terminal-friendly representation of the generated plan."""
     if result.plan is None:
         return "no plan"
     return json.dumps(result.plan, sort_keys=True, default=str)
 
 
 def _configure_runtime_dir(path):
-    """Create and select one isolated executor IPC directory."""
     runtime_dir = Path(path).resolve()
     runtime_dir.mkdir(parents=True, exist_ok=True)
     os.environ["NLP_RUN_DIR"] = str(runtime_dir)
     return runtime_dir
 
 
-def _llama_cpp_version():
-    """Return the installed llama_cpp version for the reproducibility log."""
-    return getattr(llama_cpp, "__version__", "unknown")
-
-
 def _run_cases(args, cases, planner, session, config, logger):
-    """Run selected cases and persist cumulative results."""
     results = []
     paths = ()
     for index, case in enumerate(cases):
@@ -191,7 +175,6 @@ def _run_cases(args, cases, planner, session, config, logger):
 
 
 def main():
-    """Run world validation or the selected live benchmark cases."""
     parser = _parser()
     args = parser.parse_args()
     if not args.validate_world and not args.model:
@@ -204,7 +187,6 @@ def main():
         execution_timeout_s=args.execution_timeout,
         visualization_delay_s=args.visualization_delay,
     )
-    # Matches the executor default the binder session inherited via the environment.
     session = DemoSession(visualize=os.environ.get("NLP_VISUALIZE", "1") != "0")
 
     if args.validate_world:
@@ -231,7 +213,7 @@ def main():
             "gguf_file": args.gguf_file,
             "n_ctx": args.n_ctx,
             "max_tokens": planner.MAX_NEW_TOKENS,
-            "llama_cpp_version": _llama_cpp_version(),
+            "llama_cpp_version": llama_cpp.__version__,
             "cases": len(cases),
             "case_file": str(args.cases),
             "runtime_dir": str(runtime_dir),

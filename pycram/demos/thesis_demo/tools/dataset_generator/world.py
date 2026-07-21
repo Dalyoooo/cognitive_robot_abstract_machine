@@ -3,14 +3,14 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .domain import AREAS, POSITIONS, WorldContext
+from .domain import AREAS, POSITIONS, WorldContext, normalise_words
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_HOLDOUT_PATH = PACKAGE_DIR / "assets" / "holdout.json"
 
 
 def _compact_text(value):
-    return "".join(re.findall(r"[a-z0-9]+", value.casefold()))
+    return "".join(normalise_words(value))
 
 
 def _contains_term(text, term):

@@ -261,12 +261,7 @@ def clarification_question(resolution, context, catalog):
         raise ValueError("a resolved command does not need clarification")
 
     if resolution.status == "ambiguous":
-        label = {
-            "action": "action",
-            "object": "object",
-            "source": "source",
-            "destination": "destination",
-        }[resolution.slot]
+        label = resolution.slot
         if resolution.slot == "object" and resolution.intent.action in {
             "open",
             "close",

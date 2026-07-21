@@ -1,4 +1,4 @@
-import pycram.alternative_motion_mappings.tiago_motion_mapping  # noqa: F401
+import pycram.alternative_motion_mappings.tiago_motion_mapping
 from pycram.datastructures.enums import (
     ApproachDirection,
     Arms,
@@ -278,7 +278,6 @@ class ActionMapper:
 
 
 def log_world_stats(world, when):
-    """Log world size to diagnose bodies/annotations lost after the build."""
     try:
         bodies = len(list(world.bodies))
         annotations = len(list(world.semantic_annotations))
@@ -291,7 +290,6 @@ def log_world_stats(world, when):
 
 
 def _map_step(mapper, step, step_index):
-    """Ground one high-level step and return a list of pyCRAM actions."""
     try:
         mapped_action = mapper.map(step)
     except GroundingError as error:
@@ -310,7 +308,6 @@ def _map_step(mapper, step, step_index):
 
 
 def _navigation_is_redundant(steps, step_index):
-    """Return whether the validated next action performs navigation itself."""
     step = steps[step_index]
     if step.get("action") != "NavigateAction":
         return False
@@ -330,7 +327,6 @@ def _complete_observations(
     navigation_checks=None,
     directional_checks=None,
 ):
-    """Collect the observations that must be checked after the complete plan."""
     navigation_checks = navigation_checks or []
     directional_checks = directional_checks or []
     observations = {
@@ -385,8 +381,7 @@ def _complete_observations(
     return observations
 
 
-def run_plan(world, robot, context, steps):
-    """Execute validated plan steps and return the post-plan observations."""
+def run_plan(world, robot, context, steps, step_callback=None):
     log_world_stats(world, "grounding")
     mapper = ActionMapper(world, robot, context)
     plan_root = sequential([], context=context)
@@ -438,6 +433,9 @@ def run_plan(world, robot, context, steps):
                 raise RuntimeError(
                     "No reachable pose found during execution"
                 ) from error
+
+            if step_callback is not None:
+                step_callback(step_index, step)
 
     return _complete_observations(
         mapper,

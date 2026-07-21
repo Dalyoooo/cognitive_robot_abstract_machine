@@ -1,6 +1,7 @@
 from dataclasses import replace
 
-from .domain import DIRECTIONAL_RELATIONS, Intent, PlanStep, Scenario
+from ...validation.schema import DIRECTIONAL_RELATIONS
+from .domain import Intent, PlanStep, Scenario
 from .resolver import matching_names, natural_reference
 from .policy import (
     check_destination,
@@ -167,17 +168,19 @@ class ScenarioSampler:
         if family == "clarify_missing_object":
             return self._missing_object(context, rng)
         if family == "clarify_open_container":
-            container, label = self._ambiguous_container(context, rng)
+            container, label = self._ambiguous_label(
+                context, rng, self._require_openables(context), include_ancestors=False
+            )
             return (
                 context,
                 Intent("open", object=container),
                 _references(object_text=label),
             )
         if family == "clarify_object":
-            return self._ambiguous_object_task(context, rng)
+            return self._ambiguous_transport_task(context, rng, "object")
         if family == "clarify_source":
             return self._ambiguous_source_task(context, rng)
-        return self._ambiguous_destination_task(context, rng)
+        return self._ambiguous_transport_task(context, rng, "destination")
 
     def _transport(self, context, rng, source_role, target_role):
         storage = self._storage_places(context)
@@ -371,11 +374,22 @@ class ScenarioSampler:
         )
         return context, intent, references
 
-    def _ambiguous_object_task(self, context, rng):
-        object_name, label = self._ambiguous_object(context, rng)
+    def _ambiguous_transport_task(self, context, rng, slot):
         object_places = self._object_places(context)
-        source = rng.choice(object_places)
-        destination = rng.choice(_choices_except(object_places, source))
+        if slot == "object":
+            object_name, label = self._ambiguous_label(
+                context, rng, context.objects, include_ancestors=True
+            )
+            source = rng.choice(object_places)
+            destination = rng.choice(_choices_except(object_places, source))
+        else:
+            object_name = rng.choice(context.objects)
+            destination, label = self._ambiguous_destination(
+                context,
+                rng,
+                object_places,
+            )
+            source = rng.choice(_choices_except(object_places, destination))
         context = _replace_location(context, object_name, (source,))
         intent = Intent(
             "transport",
@@ -385,7 +399,7 @@ class ScenarioSampler:
             relation="on" if destination in context.surfaces else "inside",
         )
         references = self._transport_references(context, intent)
-        references["object"] = label
+        references[slot] = label
         return context, intent, references
 
     def _ambiguous_source_task(self, context, rng):
@@ -404,27 +418,6 @@ class ScenarioSampler:
             relation="on",
         )
         references = self._transport_references(context, intent)
-        return context, intent, references
-
-    def _ambiguous_destination_task(self, context, rng):
-        object_name = rng.choice(context.objects)
-        object_places = self._object_places(context)
-        destination, label = self._ambiguous_destination(
-            context,
-            rng,
-            object_places,
-        )
-        source = rng.choice(_choices_except(object_places, destination))
-        context = _replace_location(context, object_name, (source,))
-        intent = Intent(
-            "transport",
-            object=object_name,
-            source=source,
-            destination=destination,
-            relation="on" if destination in context.surfaces else "inside",
-        )
-        references = self._transport_references(context, intent)
-        references["destination"] = label
         return context, intent, references
 
     def _transport_references(self, context, intent):
@@ -464,31 +457,19 @@ class ScenarioSampler:
             raise ValueError("world has no ambiguous destination label")
         return rng.choice(candidates)
 
-    def _ambiguous_container(self, context, rng):
-        openable = self._require_openables(context)
+    def _ambiguous_label(self, context, rng, names, *, include_ancestors):
         candidates = []
-        for name in openable:
-            for label in self.catalog.reference_labels(context.types[name]):
-                matches = matching_names(label, openable, context, self.catalog)
-                exact_instance = _is_instance_name(label, openable)
+        for name in names:
+            labels = self.catalog.labels_for(
+                context.types[name], include_ancestors=include_ancestors
+            )
+            for label in labels:
+                matches = matching_names(label, names, context, self.catalog)
+                exact_instance = _is_instance_name(label, names)
                 if len(matches) > 1 and not exact_instance:
                     candidates.append((name, label))
         if not candidates:
-            raise ValueError("world has no ambiguous openable-container label")
-        return rng.choice(candidates)
-
-    def _ambiguous_object(self, context, rng):
-        candidates = []
-        for name in context.objects:
-            for label in self.catalog.labels_for(
-                context.types[name], include_ancestors=True
-            ):
-                matches = matching_names(label, context.objects, context, self.catalog)
-                exact_instance = _is_instance_name(label, context.objects)
-                if len(matches) > 1 and not exact_instance:
-                    candidates.append((name, label))
-        if not candidates:
-            raise ValueError("world has no ambiguous object label")
+            raise ValueError("world has no ambiguous label")
         return rng.choice(candidates)
 
 

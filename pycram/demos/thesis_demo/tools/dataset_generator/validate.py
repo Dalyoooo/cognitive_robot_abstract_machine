@@ -1,19 +1,8 @@
 import json
 import re
 
-from .domain import DIRECTIONAL_RELATIONS
+from ...validation.schema import PLAN_STEP_FIELDS, VALID_PYCRAM_ACTIONS
 from .policy import check_destination, include_source, resolve_source
-
-STEP_KEYS = {"action", "object", "location", "relation", "source"}
-ACTIONS = {
-    "ParkArmsAction",
-    "NavigateAction",
-    "PickUpAction",
-    "PlaceAction",
-    "TransportAction",
-    "OpenAction",
-    "CloseAction",
-}
 
 
 def _required(value, field):
@@ -89,10 +78,7 @@ def _validate_goal(intent, steps, context):
         return
 
     if intent.action in {"open", "close"}:
-        if intent.action == "open":
-            action = "OpenAction"
-        else:
-            action = "CloseAction"
+        action = f"{intent.action.capitalize()}Action"
         target = intent.destination or intent.object
         if _goal_step(steps, action).object != target:
             raise ValueError(f"{action} uses the wrong container")
@@ -217,9 +203,9 @@ def _validate_payload(payload):
     if set(payload) != {"plan"} or not isinstance(payload["plan"], list):
         raise ValueError("assistant JSON must contain one plan or clarification")
     for step in payload["plan"]:
-        if not isinstance(step, dict) or set(step) != STEP_KEYS:
+        if not isinstance(step, dict) or set(step) != PLAN_STEP_FIELDS:
             raise ValueError("every plan step needs the exact five-field schema")
-        if step["action"] not in ACTIONS:
+        if step["action"] not in VALID_PYCRAM_ACTIONS:
             raise ValueError(f"unknown action {step['action']!r}")
 
 

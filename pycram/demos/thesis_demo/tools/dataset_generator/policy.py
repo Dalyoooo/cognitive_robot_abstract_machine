@@ -1,4 +1,4 @@
-from .domain import DIRECTIONAL_RELATIONS
+from ...validation.schema import DIRECTIONAL_RELATIONS
 
 
 def storage_containers(context, catalog):

@@ -57,7 +57,6 @@ class GroundingError(Exception):
 
 
 def directional_relation_holds(point, other, viewpoint, relation):
-    """Check one directional relation with the matching semDT predicate."""
     predicate_type = _DIRECTIONAL_PREDICATES[relation]
     predicate = predicate_type(
         point=point,
@@ -90,7 +89,6 @@ class Grounding:
                 self.annotations_by_body.setdefault(body, []).append(annotation)
 
     def resolve_annotation(self, label):
-        """Resolve a body or room ID to its most specific annotation, or None."""
         body = self.bodies_by_id.get(label.strip())
         if body is not None:
             annotations = self._annotations_on(body)
@@ -99,7 +97,6 @@ class Grounding:
         return self.rooms_by_id.get(label.strip())
 
     def body(self, label, source=None):
-        """Resolve an object label to a body, optionally checked at a source."""
         body_label = label.strip()
         body = self.bodies_by_id.get(body_label)
         if body is None:
@@ -116,7 +113,6 @@ class Grounding:
         return body
 
     def body_id(self, body):
-        """Return the planner ID exposed for a semantic body."""
         try:
             return self.ids_by_body[body]
         except KeyError as error:
@@ -125,7 +121,6 @@ class Grounding:
             ) from error
 
     def handle(self, label):
-        """Resolve a container label to its articulated handle body."""
         body = self.body(label)
         for annotation in self._annotations_on(body):
             handle = find_openable_handle(annotation)
@@ -134,14 +129,9 @@ class Grounding:
         raise GroundingError(f"Cannot open {label!r}: No articulated handle found.")
 
     def place_pose(self, target_label, obj_body, relation=None):
-        """Resolve a surface or container to one object placement pose."""
         return self.place_poses(target_label, obj_body, relation)[0]
 
     def place_poses(self, target_label, obj_body, relation=None):
-        """Resolve a destination to ordered placement pose candidates.
-
-        Surface poses preserve the order provided by semDT.
-        """
         if relation in DIRECTIONAL_RELATIONS:
             return [self.directional_pose(target_label, obj_body, relation)]
 
@@ -162,12 +152,6 @@ class Grounding:
         return [self._placement_pose(point) for point in points]
 
     def register_placement(self, object_label, target_label, relation):
-        """Register a successful placement in the destination storage space.
-
-        Failures raise RuntimeError on purpose: the object was already placed
-        physically, so the executor reports them as execution failures, not
-        grounding failures.
-        """
         object_body = self.body(object_label)
         object_annotation = self._annotation_on(object_body, HasRootBody)
 
@@ -201,11 +185,6 @@ class Grounding:
             storage.add_object(object_annotation)
 
     def remove_from_storage(self, object_label):
-        """Remove a successfully picked object from all semDT storage lists.
-
-        Failures raise RuntimeError on purpose: the object was already picked
-        up physically, so the executor reports them as execution failures.
-        """
         object_body = self.body(object_label)
         object_annotation = self._annotation_on(object_body, HasRootBody)
         if object_annotation is None:
@@ -215,7 +194,6 @@ class Grounding:
             self._remove_storage_memberships(object_annotation)
 
     def navigate_pose(self, label, annotation=None):
-        """Resolve a label to a planar navigation target pose."""
         if annotation is None:
             annotation = self.resolve_annotation(label)
         if isinstance(annotation, Room) and annotation.floor is not None:
@@ -228,7 +206,6 @@ class Grounding:
     # Placement helpers
 
     def directional_pose(self, reference_label, obj_body, relation):
-        """Find the closest free placement point in a view direction."""
         if self.robot is None:
             raise GroundingError("directional placement needs a robot viewpoint")
 
@@ -280,7 +257,6 @@ class Grounding:
         return self._world_pose(float(point.x), float(point.y), float(point.z))
 
     def _surface_points(self, surface, obj_body):
-        """Return semDT surface samples in the world frame."""
         object_annotation = self._annotation_on(obj_body, HasRootBody)
         points = surface.sample_points_from_surface(
             body_to_sample_for=object_annotation
@@ -288,7 +264,6 @@ class Grounding:
         return [self.world.transform(point, self.world.root) for point in points]
 
     def _placement_pose(self, point):
-        """Create a sampled placement pose with the demo support overlap."""
         return self._world_pose(
             float(point.x),
             float(point.y),
@@ -296,7 +271,6 @@ class Grounding:
         )
 
     def _world_pose(self, x, y, z):
-        """Create a position-only pose in the world root frame."""
         return Pose.from_xyz_rpy(
             x=x,
             y=y,
@@ -305,7 +279,6 @@ class Grounding:
         )
 
     def _supporting_surface_annotation(self, label):
-        """Return the rooted annotation that provides a usable surface."""
         body = self.body(label)
         for annotation in self._annotations_on(body):
             if provides_supporting_surface(annotation):
@@ -315,11 +288,9 @@ class Grounding:
     # Lookup helpers
 
     def _annotations_on(self, body):
-        """Return semantic annotations rooted at a body."""
         return self.annotations_by_body.get(body, [])
 
     def _annotation_on(self, body, annotation_type):
-        """Return the first rooted annotation of a requested type."""
         for annotation in self._annotations_on(body):
             if isinstance(annotation, annotation_type):
                 return annotation

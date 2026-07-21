@@ -1,7 +1,6 @@
-from dataclasses import dataclass, field, replace
+import re
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Literal
-
-from ...validation.schema import CONTEXT_KEYS
 
 
 Role = Literal["object", "surface", "container", "furniture", "room", "place"]
@@ -24,11 +23,12 @@ RECOGNIZED_POSITIONS = frozenset(POSITIONS) | {"top", "bottom", "center"}
 IGNORED_REFERENCE_WORDS = frozenset({"main"})
 
 
-DIRECTIONAL_RELATIONS = ("left_of", "right_of", "in_front_of", "behind")
-
-
 def unique(values):
     return tuple(dict.fromkeys(values))
+
+
+def normalise_words(value):
+    return re.findall(r"[a-z0-9]+", value.casefold())
 
 
 @dataclass(frozen=True)
@@ -47,19 +47,7 @@ class WorldContext:
         return name in self.openables
 
     def to_dict(self):
-        return {
-            "objects": list(self.objects),
-            "object_locations": {
-                name: list(locations)
-                for name, locations in self.object_locations.items()
-            },
-            "surfaces": list(self.surfaces),
-            "containers": list(self.containers),
-            "openables": list(self.openables),
-            "furniture": list(self.furniture),
-            "rooms": list(self.rooms),
-            "types": dict(self.types),
-        }
+        return asdict(self)
 
     @property
     def places(self):
@@ -187,13 +175,7 @@ class PlanStep:
     source: str | None = None
 
     def to_dict(self):
-        return {
-            "action": self.action,
-            "object": self.object,
-            "location": self.location,
-            "relation": self.relation,
-            "source": self.source,
-        }
+        return asdict(self)
 
 
 @dataclass(frozen=True)

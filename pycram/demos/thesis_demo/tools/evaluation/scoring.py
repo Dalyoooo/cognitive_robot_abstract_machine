@@ -17,9 +17,6 @@ from ...validation.schema import parse_clarification, parse_plan
 OUTCOMES = {"plan", "clarification"}
 PLAN_FIELDS = {"action", "object", "location", "relation", "source"}
 
-# The main per-case metrics reported in the thesis (Table A). Rates are
-# computed over the cases where the metric was observed (value is not None),
-# which gives every conditional metric its own denominator.
 MAIN_METRICS = (
     "json_valid",
     "schema_valid",
@@ -35,32 +32,21 @@ MAIN_METRICS = (
 
 
 def _valid_expected_plan(plan, outcome):
-    """Return whether an expected_plan is a goal dict or full reference step list."""
-    if outcome != "plan":
+    if outcome != "plan" or not plan:
         return False
-    if isinstance(plan, dict):
-        return bool(plan) and not (set(plan) - PLAN_FIELDS)
-    if isinstance(plan, list):
-        if not plan:
-            return False
-        for step in plan:
-            if not isinstance(step, dict) or not step:
-                return False
-            if set(step) - PLAN_FIELDS:
-                return False
-        return True
-    return False
+    steps = plan if isinstance(plan, list) else [plan]
+    return all(
+        isinstance(step, dict) and step and not (set(step) - PLAN_FIELDS)
+        for step in steps
+    )
 
 
 def json_cell(value):
-    """Serialize one optional value for a CSV cell."""
     return "" if value is None else json.dumps(value, separators=(",", ":"))
 
 
 @dataclass(frozen=True)
 class LiveCase:
-    """One instruction and its expected result."""
-
     id: str
     instruction: str
     robot: str = "hsrb"
@@ -132,7 +118,6 @@ class LiveCase:
         )
 
     def goals(self):
-        """Return expected plan goals as a list."""
         plan = self.expected_follow_up_plan or self.expected_plan
         if not plan:
             return []
@@ -141,7 +126,6 @@ class LiveCase:
         return [plan]
 
     def follow_up_case(self):
-        """Return the plan expectation after a scripted clarification answer."""
         if not self.clarification_answer or not self.expected_follow_up_plan:
             return None
         return LiveCase(
@@ -156,8 +140,6 @@ class LiveCase:
 
 @dataclass(frozen=True)
 class EvaluationConfig:
-    """Runtime timeouts for one evaluation run."""
-
     world_timeout_s: float = 60.0
     execution_timeout_s: float = 180.0
     poll_interval_s: float = 0.2
@@ -166,8 +148,6 @@ class EvaluationConfig:
 
 @dataclass
 class LiveResult:
-    """Observed result for one case."""
-
     case: LiveCase
     planner_outcome: str = "error"
     planner_success: bool = False
@@ -183,7 +163,6 @@ class LiveResult:
     metrics: dict[str, Any] = field(default_factory=dict)
 
     def to_row(self):
-        """Flatten the result for CSV export."""
         row = {
             "id": self.case.id,
             "instruction": self.case.instruction,
@@ -207,29 +186,30 @@ class LiveResult:
             "raw_responses": json_cell(self.raw_responses),
         }
         for name, value in self.metrics.items():
-            if isinstance(value, (dict, list)):
-                row[name] = json_cell(value)
-            else:
-                row[name] = value
+            row[name] = json_cell(value) if isinstance(value, (dict, list)) else value
         return row
 
 
 def _metric_value(result, name):
-    """Return one metric value from the metrics dict or the result itself."""
     if name in result.metrics:
         return result.metrics[name]
     return getattr(result, name, None)
 
 
 def metric_counts(results, name):
-    """Return (successes, observed cases) for one boolean metric."""
     values = [_metric_value(result, name) for result in results]
     values = [value for value in values if value is not None]
     return sum(bool(value) for value in values), len(values)
 
 
+def confusion_rates(tp, fp, fn, tn):
+    precision = tp / (tp + fp) if tp + fp else None
+    recall = tp / (tp + fn) if tp + fn else None
+    f1 = 2 * tp / (2 * tp + fp + fn) if 2 * tp + fp + fn else None
+    return precision, recall, f1
+
+
 def clarification_summary(results):
-    """Aggregate the first-response clarification confusion matrix (RQ4)."""
     outcomes = Counter(
         result.metrics.get("clarification_outcome") for result in results
     )
@@ -237,15 +217,16 @@ def clarification_summary(results):
     fp = outcomes.get("FP", 0)
     fn = outcomes.get("FN", 0)
     tn = outcomes.get("TN", 0)
+    precision, recall, f1 = confusion_rates(tp, fp, fn, tn)
     scripted = [result for result in results if result.case.clarification_answer]
     return {
         "tp": tp,
         "fp": fp,
         "fn": fn,
         "tn": tn,
-        "precision": tp / (tp + fp) if tp + fp else None,
-        "recall": tp / (tp + fn) if tp + fn else None,
-        "f1": 2 * tp / (2 * tp + fp + fn) if 2 * tp + fp + fn else None,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
         "scripted_cases": len(scripted),
         "scripted_successes": sum(
             bool(result.metrics.get("dialog_resolution_success")) for result in scripted
@@ -255,8 +236,6 @@ def clarification_summary(results):
 
 @dataclass(frozen=True)
 class LiveSummary:
-    """Aggregate evaluation metrics for one run."""
-
     cases: int
     metric_rates: dict[str, Any]
     clarification: dict[str, Any]
@@ -267,7 +246,6 @@ class LiveSummary:
 
     @classmethod
     def from_results(cls, results):
-        """Aggregate case results."""
         metric_rates = {}
         for name in MAIN_METRICS:
             successes, observed = metric_counts(results, name)
@@ -299,25 +277,18 @@ class LiveSummary:
 
 
 def _step_matches(step, reference):
-    """Return whether one generated step matches every field of a reference."""
     return isinstance(step, dict) and all(
         field_matches(step.get(key), value) for key, value in reference.items()
     )
 
 
 def field_matches(actual, expected):
-    """Return whether an actual field matches one or several accepted values."""
     if isinstance(expected, list):
         return actual in expected
     return actual == expected
 
 
 def _reference_satisfied(steps, expected):
-    """Return whether the steps satisfy the expected symbolic goal.
-
-    A list matches as an ordered subsequence; a dict with ``action`` matches
-    any single step; any other dict matches on destination and source fields.
-    """
     if isinstance(expected, list):
         next_step_index = 0
         for reference in expected:
@@ -347,15 +318,13 @@ def _reference_satisfied(steps, expected):
     return destination and source
 
 
-def outcome_error(case, outcome, payload):
-    """Return an outcome mismatch description or None."""
+def outcome_error(case, outcome):
     if outcome != case.expected_outcome:
         return f"expected outcome {case.expected_outcome!r}, got {outcome!r}"
     return None
 
 
 def reference_match(case, payload):
-    """Check whether the plan contains the expected symbolic goals."""
     if case.expected_outcome != "plan" or not case.expected_plan:
         return None
     steps = payload.get("plan", []) if isinstance(payload, dict) else []
@@ -363,11 +332,6 @@ def reference_match(case, payload):
 
 
 def exact_plan_match(case, payload):
-    """Compare a full reference sequence for diagnosis only.
-
-    A single goal dictionary does not describe a complete plan, so exact match
-    is unavailable for that case.
-    """
     expected = case.expected_plan
     if case.expected_outcome != "plan" or not isinstance(expected, list):
         return None
@@ -378,7 +342,6 @@ def exact_plan_match(case, payload):
 
 
 def allowed_names_for_step(step, names):
-    """Return the context names each plan-step field is allowed to reference."""
     action = step.get("action")
     relation = step.get("relation")
     return {
@@ -389,7 +352,6 @@ def allowed_names_for_step(step, names):
 
 
 def has_hallucinated_name(plan, context):
-    """Return whether a plan references a name absent from its context."""
     names = context_names(context)
     for step in plan.get("plan", []):
         if not isinstance(step, dict):
@@ -402,7 +364,6 @@ def has_hallucinated_name(plan, context):
 
 
 def plan_quality_metrics(case, outcome, payload, context, planner_metadata=None):
-    """Return validity and diagnostic metrics for one planner response."""
     planner_metadata = planner_metadata or {}
     normalized = {"clarification": payload} if outcome == "clarification" else payload
     parsed_payload = (outcome == "plan" and isinstance(payload, dict)) or (
@@ -445,8 +406,6 @@ def plan_quality_metrics(case, outcome, payload, context, planner_metadata=None)
 
 CASES_FILE = Path(__file__).with_name("kitchen_eval_samples.jsonl")
 
-# Manipulable objects created by the Kitchen demo in nlp_demo_config.py.
-# ``--validate-world`` compares this frozen set with the live context.
 KITCHEN_OBJECT_IDS = {
     "cheezeit",
     "gelatinbox",
@@ -463,7 +422,6 @@ KITCHEN_OBJECT_IDS = {
 
 
 def validate_entities(case, context, label):
-    """Reject case goals that name entities absent from a world context."""
     steps = case.goals()
     if not steps:
         return
@@ -494,7 +452,6 @@ def validate_entities(case, context, label):
 
 
 def covered_objects(cases):
-    """Return every object used by the expected plans."""
     objects = set()
     for case in cases:
         for goal in case.goals():
@@ -505,7 +462,6 @@ def covered_objects(cases):
 
 
 def validate_kitchen_inventory(context, label):
-    """Check that the live Kitchen still has the frozen object inventory."""
     live_objects = set(context.get("objects", []))
     if live_objects == KITCHEN_OBJECT_IDS:
         return
@@ -518,7 +474,6 @@ def validate_kitchen_inventory(context, label):
 
 
 def load_cases(path=CASES_FILE):
-    """Load and validate independent cases from the JSONL benchmark."""
     cases = [
         LiveCase.from_dict(json.loads(line))
         for line in path.read_text(encoding="utf-8").splitlines()

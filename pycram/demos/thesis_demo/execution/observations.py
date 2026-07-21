@@ -6,7 +6,6 @@ from .grounding import directional_relation_holds
 
 
 def _navigation_succeeded(action):
-    """Check the final pose of one executed CRAM navigation action."""
     try:
         return bool(action.evaluate_post_condition())
     except ConditionNotSatisfied:
@@ -14,7 +13,6 @@ def _navigation_succeeded(action):
 
 
 def _directional_observation(mapper, step, viewpoint):
-    """Check one directional placement using its grounding viewpoint."""
     object_body = mapper.grounding.body(step["object"])
     reference_body = mapper.grounding.body(step["location"])
     relation_holds = directional_relation_holds(
@@ -32,7 +30,6 @@ def _directional_observation(mapper, step, viewpoint):
 
 
 def _container_state(mapper, container_name):
-    """Return the final articulated state of one container."""
     handle = mapper.grounding.handle(container_name)
     try:
         connection = handle.get_first_parent_connection_of_type(ActiveConnection1DOF)
@@ -54,12 +51,10 @@ def _container_state(mapper, container_name):
 
 
 def _is_below(world, body, possible_parent):
-    """Return whether a body is attached below another body."""
     return body in world.get_kinematic_structure_entities_of_branch(possible_parent)
 
 
 def _held_objects(mapper, robot, object_names):
-    """Return planner object IDs currently attached to a robot gripper."""
     tool_frames = []
     for arm in mapper.arms:
         end_effector = ViewManager.get_end_effector_view(arm, robot)

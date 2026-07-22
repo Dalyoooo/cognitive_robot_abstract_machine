@@ -219,7 +219,11 @@ def main():
             "runtime_dir": str(runtime_dir),
         },
     )
-    gguf_file = args.gguf_file or (args.model if Path(args.model).is_file() else None)
+    gguf_file = (
+        args.gguf_file
+        or os.environ.get("PLANNER_GGUF_FILE")
+        or (args.model if Path(args.model).is_file() else None)
+    )
     run_phase = "planner_setup"
     try:
         planner.setup_planner(

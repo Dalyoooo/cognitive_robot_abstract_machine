@@ -3,7 +3,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Mapping
 
-from .domain import normalise_words, unique
+from thesis_demo.tools.dataset_generator.domain import normalise_words, unique
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_CATALOG_PATH = PACKAGE_DIR / "assets" / "catalog.json"

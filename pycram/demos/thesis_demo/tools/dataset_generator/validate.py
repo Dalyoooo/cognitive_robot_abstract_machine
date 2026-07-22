@@ -1,8 +1,12 @@
 import json
 import re
 
-from ...validation.schema import PLAN_STEP_FIELDS, VALID_PYCRAM_ACTIONS
-from .policy import check_destination, include_source, resolve_source
+from thesis_demo.tools.dataset_generator.policy import (
+    check_destination,
+    include_source,
+    resolve_source,
+)
+from thesis_demo.validation.schema import PLAN_STEP_FIELDS, VALID_PYCRAM_ACTIONS
 
 
 def _required(value, field):
@@ -216,16 +220,16 @@ def _instruction_text(content):
     return match.group(1)
 
 
-def _reject_raw_ids(text, context):
+def _reject_raw_names(text, context):
     for name in context.objects + context.places:
         if "_" not in name and not any(character.isdigit() for character in name):
             continue
         pattern = rf"(?<![a-z0-9_]){re.escape(name)}(?![a-z0-9_])"
         if re.search(pattern, text, re.IGNORECASE):
-            raise ValueError(f"user-facing text contains raw instance ID {name!r}")
+            raise ValueError(f"user-facing text contains raw instance name {name!r}")
 
 
-def validate_messages(example):
+def validate_messages(example, natural_context):
     if not example.messages or example.messages[0].get("role") != "system":
         raise ValueError("conversation must start with a system message")
 
@@ -239,7 +243,8 @@ def validate_messages(example):
         if not isinstance(content, str):
             raise ValueError("message content must be text")
         if role == "user":
-            _reject_raw_ids(_instruction_text(content), example.context)
+            _reject_raw_names(_instruction_text(content), example.context)
+            _reject_raw_names(_instruction_text(content), natural_context)
             expected = "assistant"
         else:
             try:
@@ -248,7 +253,8 @@ def validate_messages(example):
                 raise ValueError("assistant content is not JSON") from error
             _validate_payload(payload)
             if "clarification" in payload:
-                _reject_raw_ids(payload["clarification"], example.context)
+                _reject_raw_names(payload["clarification"], example.context)
+                _reject_raw_names(payload["clarification"], natural_context)
             assistant_count += 1
             expected = "user"
 
@@ -261,7 +267,7 @@ def validate_unique_examples(examples):
     conversations = set()
     for example in examples:
         if example.scenario_id in scenario_ids:
-            raise ValueError(f"duplicate scenario ID: {example.scenario_id}")
+            raise ValueError(f"duplicate scenario name: {example.scenario_id}")
         scenario_ids.add(example.scenario_id)
         key = json.dumps(example.messages, sort_keys=True)
         if key in conversations:

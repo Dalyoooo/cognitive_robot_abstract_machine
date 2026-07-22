@@ -5,14 +5,13 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .catalog import (
+from thesis_demo.tools.dataset_generator.catalog import (
     DEFAULT_CATALOG_PATH,
     PACKAGE_DIR,
     SCHEMA_VERSION,
     SemanticCatalog,
     TypeSpec,
 )
-from .domain import unique
 
 DEFAULT_POLICY_PATH = PACKAGE_DIR / "assets" / "catalog_policy.json"
 

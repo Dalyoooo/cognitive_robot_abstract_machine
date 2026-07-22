@@ -406,20 +406,6 @@ def plan_quality_metrics(case, outcome, payload, context, planner_metadata=None)
 
 CASES_FILE = Path(__file__).with_name("kitchen_eval_samples.jsonl")
 
-KITCHEN_OBJECT_IDS = {
-    "cheezeit",
-    "gelatinbox",
-    "gelatinbox_counter",
-    "kettle",
-    "mustard_bottle",
-    "pringles",
-    "saltcontainer",
-    "soap_bottle",
-    "tomatosoup",
-    "tunacan",
-    "wine_bottle",
-}
-
 
 def validate_entities(case, context, label):
     steps = case.goals()
@@ -452,25 +438,36 @@ def validate_entities(case, context, label):
 
 
 def covered_objects(cases):
-    objects = set()
-    for case in cases:
-        for goal in case.goals():
-            object_id = goal.get("object")
-            if object_id in KITCHEN_OBJECT_IDS:
-                objects.add(object_id)
-    return objects
+    """Return every object id the benchmark goals manipulate."""
+    return {
+        goal["object"]
+        for case in cases
+        for goal in case.goals()
+        if goal.get("object")
+    }
 
 
-def validate_kitchen_inventory(context, label):
-    live_objects = set(context.get("objects", []))
-    if live_objects == KITCHEN_OBJECT_IDS:
-        return
+def live_entity_names(context):
+    """Return every entity id the live world context exposes."""
+    names = set()
+    for key in ("objects", "surfaces", "containers", "openables", "furniture", "rooms"):
+        names.update(context.get(key, []))
+    names.update(context.get("object_locations", {}))
+    return names
 
-    missing = sorted(KITCHEN_OBJECT_IDS - live_objects)
-    added = sorted(live_objects - KITCHEN_OBJECT_IDS)
-    raise ValueError(
-        f"{label} object inventory changed; missing={missing!r}, added={added!r}"
-    )
+
+def validate_kitchen_inventory(context, cases, label):
+    """Reject a live world missing an entity the benchmark references.
+
+    Coverage is derived from the cases rather than a frozen list, so adding
+    new objects to the world never breaks the benchmark; only a referenced
+    entity that the live world no longer provides is an error.
+    """
+    missing = sorted(covered_objects(cases) - live_entity_names(context))
+    if missing:
+        raise ValueError(
+            f"{label} is missing benchmark objects: {', '.join(missing)}"
+        )
 
 
 def load_cases(path=CASES_FILE):
@@ -486,9 +483,4 @@ def load_cases(path=CASES_FILE):
     for case in cases:
         if case.environment != "kitchen":
             raise ValueError(f"{case.id}: only the kitchen environment is supported")
-
-    missing_objects = KITCHEN_OBJECT_IDS - covered_objects(cases)
-    if missing_objects:
-        missing = ", ".join(sorted(missing_objects))
-        raise ValueError(f"case file does not cover Kitchen objects: {missing}")
     return cases

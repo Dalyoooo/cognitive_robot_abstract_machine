@@ -1,4 +1,4 @@
-from ...validation.schema import DIRECTIONAL_RELATIONS
+from thesis_demo.validation.schema import DIRECTIONAL_RELATIONS
 
 
 def storage_containers(context, catalog):

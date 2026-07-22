@@ -1,21 +1,24 @@
 import re
 from dataclasses import replace
+from types import MappingProxyType
 
-from .domain import (
+from thesis_demo.tools.dataset_generator.domain import (
     IGNORED_REFERENCE_WORDS,
     RECOGNIZED_POSITIONS,
     Resolution,
     unique,
 )
 
-_REQUIRED_SLOTS = {
-    "transport": ("object", "destination"),
-    "pickup": ("object",),
-    "pickup_place": ("object", "destination"),
-    "navigate": ("destination",),
-    "open": ("destination",),
-    "close": ("destination",),
-}
+_REQUIRED_SLOTS = MappingProxyType(
+    {
+        "transport": ("object", "destination"),
+        "pickup": ("object",),
+        "pickup_place": ("object", "destination"),
+        "navigate": ("destination",),
+        "open": ("destination",),
+        "close": ("destination",),
+    }
+)
 
 
 def _same_text(left, right):
@@ -189,7 +192,7 @@ def _missing_slot_resolution(intent):
             if intent.destination is None and intent.object is None:
                 return Resolution("missing", intent, slot=slot)
             continue
-        if getattr(intent, slot) is None:
+        if intent.value_for(slot) is None:
             return Resolution("missing", intent, slot=slot)
     return None
 

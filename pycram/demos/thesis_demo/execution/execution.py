@@ -1,11 +1,8 @@
+from dataclasses import dataclass, field
+
 import pycram.alternative_motion_mappings.tiago_motion_mapping
-from pycram.datastructures.enums import (
-    ApproachDirection,
-    Arms,
-    VerticalAlignment,
-)
-from pycram.datastructures.grasp import GraspDescription
-from pycram.locations.locations import CostmapLocation
+from pycram.datastructures.enums import Arms
+from pycram.locations.locations import AccessingLocation, CostmapLocation
 from pycram.motion_executor import simulated_robot
 from pycram.plans.factories import make_node, sequential
 from pycram.robot_plans.actions.composite.transporting import TransportAction
@@ -14,31 +11,62 @@ from pycram.robot_plans.actions.core.navigation import NavigateAction
 from pycram.robot_plans.actions.core.pick_up import PickUpAction
 from pycram.robot_plans.actions.core.placing import PlaceAction
 from pycram.robot_plans.actions.core.robot_body import ParkArmsAction
-from pycram.view_manager import ViewManager
 
-from ..validation.schema import DIRECTIONAL_RELATIONS, VALID_PYCRAM_ACTIONS
-from .grounding import Grounding, GroundingError
-from .observations import (
+from thesis_demo.execution.grounding import Grounding, GroundingError
+from thesis_demo.execution.observations import (
     _container_state,
     _directional_observation,
     _held_objects,
     _navigation_succeeded,
 )
+from thesis_demo.validation.schema import DIRECTIONAL_RELATIONS, VALID_PYCRAM_ACTIONS
 
-ACTIONS_WITH_NAVIGATION = {
-    "OpenAction",
-    "CloseAction",
-    "PickUpAction",
-    "PlaceAction",
-}
+ACTIONS_WITH_NAVIGATION = frozenset(
+    {
+        "OpenAction",
+        "CloseAction",
+        "PickUpAction",
+        "PlaceAction",
+    }
+)
 
 
+@dataclass
+class _MapPoint:
+    x: float
+    y: float
+    z: float
+
+
+def _map_point(pose):
+    matrix = pose.to_np()
+    return _MapPoint(float(matrix[0, 3]), float(matrix[1, 3]), float(matrix[2, 3]))
+
+
+class ContainerAccessLocation(AccessingLocation):
+    def setup_costmaps(self, handle):
+        cost_map = super().setup_costmaps(handle)
+        closed_pose, _half_open_pose, open_pose = self.create_target_sequence()
+        self.adjust_map_for_drawer_opening(
+            cost_map, _map_point(closed_pose), _map_point(open_pose)
+        )
+        return cost_map
+
+
+@dataclass
 class ActionMapper:
+    world: object
+    robot: object
+    context: object
+    grounding: Grounding = field(init=False)
+    arms: list = field(init=False)
+    arm: object = field(init=False)
+    pending_pickup: object = field(init=False, default=None)
+    _dispatch: dict = field(init=False)
 
-    def __init__(self, world, robot, context):
-        self.grounding = Grounding(world, robot)
-        self.context = context
-        arm_count = len(robot.get_arms())
+    def __post_init__(self):
+        self.grounding = Grounding(self.world, self.robot)
+        arm_count = len(self.robot.get_arms())
         if arm_count == 1:
             self.arms = [Arms.LEFT]
         elif arm_count == 2:
@@ -48,7 +76,6 @@ class ActionMapper:
                 f"The Binder supports one or two robot arms, found {arm_count}"
             )
         self.arm = self.arms[0]
-        self.pending_pickup = None
         self._dispatch = dict(
             NavigateAction=self._navigate,
             PickUpAction=self._pick_up,
@@ -60,7 +87,6 @@ class ActionMapper:
         )
 
     def map(self, step):
-        """Map one planner step to a grounded pyCRAM action or action list."""
         action = step["action"]
         handler = self._dispatch.get(action)
         if handler is None:
@@ -76,7 +102,6 @@ class ActionMapper:
         )
 
     def register_placement(self, step):
-        """Register a successfully executed placement in semDT storage."""
         if step["action"] not in ("PlaceAction", "TransportAction"):
             return
         self.grounding.register_placement(
@@ -86,13 +111,10 @@ class ActionMapper:
         )
 
     def register_world_state(self, step):
-        """Synchronize semDT storage after a successfully executed step."""
         if step["action"] == "PickUpAction":
             self.grounding.remove_from_storage(step["object"])
             return
         self.register_placement(step)
-
-    # ----- Action builders -----
 
     def _transport(self, object_name, location, relation, source):
         if self.pending_pickup is not None:
@@ -142,7 +164,7 @@ class ActionMapper:
         body = pickup_action.object_designator
         arm = pickup_action.arm
         grasp_description = pickup_action.grasp_description
-        pending_name = self.grounding.body_id(body)
+        pending_name = self.grounding.body_name(body)
         if pending_name != object_name:
             raise GroundingError(
                 f"Cannot place {object_name!r}: "
@@ -159,6 +181,8 @@ class ActionMapper:
                     grasp_description=grasp_description,
                 )
             except GroundingError as error:
+                # A surface provides several samples. An unreachable sample does
+                # not invalidate the remaining pyCRAM candidates.
                 last_error = error
                 continue
 
@@ -186,16 +210,28 @@ class ActionMapper:
 
     def _container_action(self, action_type, object_name):
         handle = self.grounding.handle(object_name)
-        base_pose, arm = self._resolve_reachable(
-            handle.global_pose,
-            excluded_arms=self._occupied_arms(),
-            front_grasp=True,
-        )
+        base_pose, arm = self._resolve_container_access(handle)
         self.arm = arm
         return [
             NavigateAction(target_location=base_pose),
             action_type(object_designator=handle, arm=arm),
         ]
+
+    def _resolve_container_access(self, handle):
+        free_arms = [arm for arm in self.arms if arm not in self._occupied_arms()]
+        if not free_arms:
+            raise GroundingError("No free arm available for the requested action")
+        arm = self.arm if self.arm in free_arms else free_arms[0]
+
+        access_poses = iter(
+            ContainerAccessLocation(handle=handle, arm=arm, context=self.context)
+        )
+        base_pose = next(access_poses, None)
+        if base_pose is None:
+            raise GroundingError(
+                f"No base pose to access the handle {handle.name!s} found"
+            )
+        return base_pose, arm
 
     def _navigate(self, _object_name, location, _relation, _source):
         label = location
@@ -210,6 +246,7 @@ class ActionMapper:
                 context=self.context,
             ).resolve()
         except StopIteration as error:
+            # CostmapLocation signals an empty candidate generator this way.
             raise GroundingError(
                 f"No collision-free navigation pose for {label!r}"
             ) from error
@@ -218,8 +255,6 @@ class ActionMapper:
     @staticmethod
     def _park(_object_name, _location, _relation, _source):
         return ParkArmsAction(arm=Arms.BOTH)
-
-    # ----- helpers -----
 
     def _occupied_arms(self):
         if self.pending_pickup is None:
@@ -231,7 +266,6 @@ class ActionMapper:
         target_pose,
         excluded_arms=None,
         grasp_description=None,
-        front_grasp=False,
     ):
         excluded_arms = excluded_arms or set()
         arms_to_try = []
@@ -248,45 +282,31 @@ class ActionMapper:
 
         last_error = None
         for arm in arms_to_try:
-            grasp = grasp_description
-            if front_grasp:
-                grasp = self._front_grasp(arm)
             try:
                 base_pose = CostmapLocation(
                     target=target_pose,
                     reachable=True,
                     reachable_arm=arm,
                     context=self.context,
-                    grasp_description=grasp,
+                    grasp_description=grasp_description,
                 ).resolve()
                 # A reachable costmap yields a GraspPose that carries its arm.
                 return base_pose, base_pose.arm
             except StopIteration as error:
+                # pyCRAM exhausts one arm's costmap before another arm is tried.
                 last_error = error
         raise GroundingError(
             f"No reachable arm for target pose {target_pose!r}: {last_error!r}"
         ) from last_error
 
-    def _front_grasp(self, arm):
-        """Build the grasp that pyCRAM OpenAction and CloseAction use."""
-        end_effector = ViewManager.get_end_effector_view(arm, self.context.robot)
-        return GraspDescription(
-            ApproachDirection.FRONT,
-            VerticalAlignment.NoAlignment,
-            end_effector,
-        )
-
 
 def log_world_stats(world, when):
-    try:
-        bodies = len(list(world.bodies))
-        annotations = len(list(world.semantic_annotations))
-        print(
-            f"[executor] world @ {when}: bodies={bodies} annotations={annotations}",
-            flush=True,
-        )
-    except Exception as error:
-        print(f"[executor] world stats @ {when} failed: {error!r}", flush=True)
+    bodies = len(list(world.bodies))
+    annotations = len(list(world.semantic_annotations))
+    print(
+        f"[executor] world @ {when}: bodies={bodies} annotations={annotations}",
+        flush=True,
+    )
 
 
 def _map_step(mapper, step, step_index):
@@ -296,6 +316,7 @@ def _map_step(mapper, step, step_index):
         error.attach_step(step_index, step)
         raise
     except StopIteration as error:
+        # Keep pyCRAM's exhausted location iterator out of the planner API.
         raise GroundingError(
             "No reachable pose found while grounding the step",
             step_index=step_index,
@@ -308,6 +329,8 @@ def _map_step(mapper, step, step_index):
 
 
 def _navigation_is_redundant(steps, step_index):
+    # These pyCRAM actions already use a grounded base pose, so a directly
+    # preceding NavigateAction would execute the same navigation twice.
     step = steps[step_index]
     if step.get("action") != "NavigateAction":
         return False
@@ -437,10 +460,11 @@ def run_plan(world, robot, context, steps, step_callback=None):
             if step_callback is not None:
                 step_callback(step_index, step)
 
-    return _complete_observations(
+    observations = _complete_observations(
         mapper,
         robot,
         steps,
         navigation_checks,
         directional_checks,
     )
+    return observations

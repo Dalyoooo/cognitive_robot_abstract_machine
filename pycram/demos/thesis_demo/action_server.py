@@ -5,16 +5,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import rclpy
-from rclpy.action import ActionServer, GoalResponse
+from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import String
 from thesis_demo_msgs.action import ExecutePlan
 
-from .execution.execution import log_world_stats, run_plan
-from .execution.grounding import GroundingError
-from .planner.world_context import classify_world
-from .world.nlp_demo import build_world
+from thesis_demo.execution.execution import log_world_stats, run_plan
+from thesis_demo.execution.grounding import GroundingError
+from thesis_demo.planner.world_context import classify_world
+from thesis_demo.validation.schema import parse_plan
+from thesis_demo.world.nlp_demo import build_world
 
 ACTION_NAME = "execute_plan"
 CONTEXT_TOPIC = "world_context"
@@ -35,6 +36,7 @@ def _result_file():
 
 
 def _atomic_write_json(path, data):
+    # The Binder reads these files concurrently, so it must never see partial JSON.
     temporary_path = path.with_name(f".{path.name}.tmp")
     with open(temporary_path, "w", encoding="utf-8") as handle:
         json.dump(data, handle)
@@ -50,12 +52,7 @@ def _parse_steps(plan_json):
         plan_data = json.loads(plan_json)
     except json.JSONDecodeError as error:
         raise ValueError(f"Plan is not valid JSON: {error}") from error
-    if not isinstance(plan_data, dict):
-        raise ValueError("Plan must be a JSON object")
-    steps = plan_data.get("plan", [])
-    if not isinstance(steps, list) or not steps:
-        raise ValueError("Plan contains no steps")
-    return steps
+    return [step.as_dict() for step in parse_plan(plan_data)]
 
 
 def _latched_qos():
@@ -73,7 +70,6 @@ class PlanExecutor:
     action_server: object = field(init=False, default=None)
 
     def start(self):
-        """Publish the initial context and start serving goals."""
         self.context_publisher = self.node.create_publisher(
             String, CONTEXT_TOPIC, _latched_qos()
         )
@@ -84,12 +80,17 @@ class PlanExecutor:
             ACTION_NAME,
             execute_callback=self.execute,
             goal_callback=self.accept_or_reject,
+            cancel_callback=self.reject_cancellation,
         )
 
-    def accept_or_reject(self, goal_request):
+    def accept_or_reject(self, _goal_request):
         if self.busy:
             return GoalResponse.REJECT
+        self.busy = True
         return GoalResponse.ACCEPT
+
+    def reject_cancellation(self, _cancel_request):
+        return CancelResponse.REJECT
 
     def execute(self, goal_handle):
         self.busy = True
@@ -97,6 +98,7 @@ class PlanExecutor:
             result = self._run_requested_plan(goal_handle)
             result = self._refresh_context_before_result(result)
             _atomic_write_json(_result_file(), result)
+            # The Binder receives domain failures inside result_json.
             goal_handle.succeed()
             response = ExecutePlan.Result()
             response.result_json = json.dumps(result)
@@ -137,9 +139,8 @@ class PlanExecutor:
                 "grounding", str(error), grounding_error=error.to_dict()
             )
         except Exception as error:
-            print(
-                f"[action_server] error: {error!r}\n{traceback.format_exc()}",
-                flush=True,
+            self.node.get_logger().error(
+                f"Execution failed: {error!r}\n{traceback.format_exc()}"
             )
             return _error_result(
                 "execution",
@@ -152,10 +153,7 @@ class PlanExecutor:
         try:
             self.publish_context()
         except Exception as error:
-            print(
-                f"[action_server] context refresh failed: {error!r}",
-                flush=True,
-            )
+            self.node.get_logger().error(f"Context refresh failed: {error!r}")
             # The stale context log no longer matches the world.
             _context_file().unlink(missing_ok=True)
             return _error_result(
@@ -176,15 +174,17 @@ def _build_selected_world():
 
 
 def main():
+    # Initialize ROS once up front.
+    rclpy.init()
     try:
         world, robot, context, visualization_node = _build_selected_world()
     except Exception as error:
+        # Startup failures are persisted because no action result can exist yet.
         message = f"World setup failed: {type(error).__name__}: {error}"
         print(f"[action_server] {message}\n{traceback.format_exc()}", flush=True)
         _atomic_write_json(_result_file(), _error_result("world_setup", message))
         raise SystemExit(1)
 
-    rclpy.init()
     node = rclpy.create_node("thesis_demo_executor")
     plan_executor = PlanExecutor(node, world, robot, context)
     plan_executor.start()

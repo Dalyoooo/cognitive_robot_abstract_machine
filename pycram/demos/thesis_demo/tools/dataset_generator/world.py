@@ -3,7 +3,12 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .domain import AREAS, POSITIONS, WorldContext, normalise_words
+from thesis_demo.tools.dataset_generator.domain import (
+    AREAS,
+    POSITIONS,
+    WorldContext,
+    normalise_words,
+)
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_HOLDOUT_PATH = PACKAGE_DIR / "assets" / "holdout.json"
@@ -23,7 +28,6 @@ def _contains_term(text, term):
 
 @dataclass(frozen=True)
 class HoldoutPolicy:
-
     objects: frozenset[str]
     instances: frozenset[str]
     types: frozenset[str]
@@ -89,14 +93,13 @@ def _safe_token(label):
     return token or "entity"
 
 
-def _assert_unprefixed_ids(context):
+def _assert_unprefixed_names(context):
     prefixed = sorted(name for name in context.objects + context.places if "/" in name)
     if prefixed:
-        raise ValueError(f"generated planner IDs must not contain '/': {prefixed}")
+        raise ValueError(f"generated planner names must not contain '/': {prefixed}")
 
 
 class WorldComposer:
-
     def __init__(self, catalog, holdout):
         self.catalog = catalog
         self.holdout = holdout
@@ -241,6 +244,6 @@ class WorldComposer:
             types=types,
         )
         result.validate()
-        _assert_unprefixed_ids(result)
+        _assert_unprefixed_names(result)
         self.holdout.assert_clean(result, self.catalog)
         return result

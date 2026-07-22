@@ -8,10 +8,10 @@ from .world.nlp_demo import build_world
 KITCHEN_PLAN = [
     {
         "action": "TransportAction",
-        "object": "cheezeit",
-        "location": "table_area",
+        "object": "cheeze_it",
+        "location": "table",
         "relation": "on",
-        "source": "kitchen_island_surface",
+        "source": "counter_top_3",
     },
     {
         "action": "ParkArmsAction",
@@ -26,9 +26,9 @@ APARTMENT_PLAN = [
     {
         "action": "TransportAction",
         "object": "milk",
-        "location": "table_area_main",
+        "location": "table",
         "relation": "on",
-        "source": "island_countertop",
+        "source": "counter_top_2",
     },
     {
         "action": "ParkArmsAction",

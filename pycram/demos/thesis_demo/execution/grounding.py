@@ -1,9 +1,10 @@
+from dataclasses import dataclass, field
+
 from semantic_digital_twin.reasoning.predicates import (
     Behind,
     InFrontOf,
     LeftOf,
     RightOf,
-    is_supported_by,
 )
 from semantic_digital_twin.semantic_annotations.mixins import (
     HasRootBody,
@@ -11,18 +12,18 @@ from semantic_digital_twin.semantic_annotations.mixins import (
 )
 from semantic_digital_twin.semantic_annotations.semantic_annotations import Room
 from semantic_digital_twin.spatial_types.spatial_types import Point3, Pose
-from semantic_digital_twin.world_description.world_entity import SemanticAnnotation
 
-from ..validation.schema import DIRECTIONAL_RELATIONS, INSIDE_RELATIONS
-from ..planner.world_context import (
+from thesis_demo.planner.world_context import (
+    annotations_by_body,
     find_openable_handle,
     is_at_location,
     is_inside_or_attached,
-    planner_ids_for,
+    planner_names_for,
     primary_annotation,
     provides_supporting_surface,
     supporting_surface_of,
 )
+from thesis_demo.validation.schema import DIRECTIONAL_RELATIONS, INSIDE_RELATIONS
 
 SUPPORT_DETECTION_OVERLAP = 0.01
 
@@ -32,14 +33,18 @@ _DIRECTIONAL_PREDICATES = {
     "in_front_of": InFrontOf,
     "behind": Behind,
 }
-assert set(_DIRECTIONAL_PREDICATES) == set(DIRECTIONAL_RELATIONS)
+if set(_DIRECTIONAL_PREDICATES) != set(DIRECTIONAL_RELATIONS):
+    raise RuntimeError("Directional predicate mapping does not match the schema")
 
 
+@dataclass(eq=False)
 class GroundingError(Exception):
-    def __init__(self, message, *, step_index=None, action=None):
-        super().__init__(message)
-        self.step_index = step_index
-        self.action = action
+    message: str
+    step_index: object = None
+    action: object = None
+
+    def __post_init__(self):
+        Exception.__init__(self, self.message)
 
     def attach_step(self, step_index, step):
         if self.step_index is None:
@@ -56,6 +61,10 @@ class GroundingError(Exception):
         }
 
 
+class GroundingConsistencyError(RuntimeError):
+    pass
+
+
 def directional_relation_holds(point, other, viewpoint, relation):
     predicate_type = _DIRECTIONAL_PREDICATES[relation]
     predicate = predicate_type(
@@ -66,41 +75,42 @@ def directional_relation_holds(point, other, viewpoint, relation):
     return bool(predicate())
 
 
+@dataclass
 class Grounding:
+    world: object
+    robot: object = None
+    names_by_body: dict = field(init=False)
+    bodies_by_name: dict = field(init=False)
+    rooms_by_name: dict = field(init=False)
+    annotations_by_body: dict = field(init=False)
 
-    def __init__(self, world, robot=None):
-        """Create a grounding helper for one world."""
-        self.world = world
-        self.robot = robot
-
-        planner_ids = planner_ids_for(world)
-        self.ids_by_body = {body: planner_ids[str(body.name)] for body in world.bodies}
-        self.bodies_by_id = {
-            planner_id: body for body, planner_id in self.ids_by_body.items()
+    def __post_init__(self):
+        planner_names = planner_names_for(self.world)
+        self.names_by_body = {
+            body: planner_names[str(body.name)] for body in self.world.bodies
+        }
+        self.bodies_by_name = {
+            planner_name: body for body, planner_name in self.names_by_body.items()
         }
 
-        rooms = world.get_semantic_annotations_by_type(Room)
-        self.rooms_by_id = {planner_ids[str(room.name)]: room for room in rooms}
+        rooms = self.world.get_semantic_annotations_by_type(Room)
+        self.rooms_by_name = {planner_names[str(room.name)]: room for room in rooms}
 
-        self.annotations_by_body = {}
-        for annotation in world.get_semantic_annotations_by_type(SemanticAnnotation):
-            body = getattr(annotation, "root", None)
-            if body is not None:
-                self.annotations_by_body.setdefault(body, []).append(annotation)
+        self.annotations_by_body = annotations_by_body(self.world)
 
     def resolve_annotation(self, label):
-        body = self.bodies_by_id.get(label.strip())
+        body = self.bodies_by_name.get(label.strip())
         if body is not None:
             annotations = self._annotations_on(body)
             if annotations:
                 return primary_annotation(annotations)
-        return self.rooms_by_id.get(label.strip())
+        return self.rooms_by_name.get(label.strip())
 
     def body(self, label, source=None):
         body_label = label.strip()
-        body = self.bodies_by_id.get(body_label)
+        body = self.bodies_by_name.get(body_label)
         if body is None:
-            raise GroundingError(f"cannot find canonical body ID {body_label!r}")
+            raise GroundingError(f"cannot find canonical body name {body_label!r}")
 
         if source:
             source_label = source.strip()
@@ -112,13 +122,11 @@ class Grounding:
                 )
         return body
 
-    def body_id(self, body):
-        try:
-            return self.ids_by_body[body]
-        except KeyError as error:
-            raise GroundingError(
-                f"body {body.name!s} is not exposed to the planner"
-            ) from error
+    def body_name(self, body):
+        planner_name = self.names_by_body.get(body)
+        if planner_name is None:
+            raise GroundingError(f"body {body.name!s} is not exposed to the planner")
+        return planner_name
 
     def handle(self, label):
         body = self.body(label)
@@ -128,15 +136,15 @@ class Grounding:
                 return handle.root
         raise GroundingError(f"Cannot open {label!r}: No articulated handle found.")
 
-    def place_pose(self, target_label, obj_body, relation=None):
-        return self.place_poses(target_label, obj_body, relation)[0]
+    def place_pose(self, target_label, object_body, relation=None):
+        return self.place_poses(target_label, object_body, relation)[0]
 
-    def place_poses(self, target_label, obj_body, relation=None):
+    def place_poses(self, target_label, object_body, relation=None):
         if relation in DIRECTIONAL_RELATIONS:
-            return [self.directional_pose(target_label, obj_body, relation)]
+            return [self.directional_pose(target_label, object_body, relation)]
 
         if relation in INSIDE_RELATIONS:
-            return [self._inside_pose(self.body(target_label), obj_body)]
+            return [self._inside_pose(self.body(target_label), object_body)]
 
         surface = self._supporting_surface_annotation(target_label)
         if surface is None:
@@ -144,7 +152,7 @@ class Grounding:
                 f"cannot place 'on' {target_label!r}: no supporting surface"
             )
 
-        points = self._surface_points(surface, obj_body)
+        points = self._surface_points(surface, object_body)
         if not points:
             raise GroundingError(
                 f"no free placement point on {str(surface.root.name)!r}"
@@ -153,42 +161,35 @@ class Grounding:
 
     def register_placement(self, object_label, target_label, relation):
         object_body = self.body(object_label)
-        object_annotation = self._annotation_on(object_body, HasRootBody)
-
-        if object_annotation is None:
-            raise RuntimeError(f"No storage annotation found for {object_label!r}")
-
-        if relation in DIRECTIONAL_RELATIONS:
-            target_body = self.body(target_label)
-            storage = supporting_surface_of(self.world, target_body)
-        elif relation in INSIDE_RELATIONS:
-            target_body = self.body(target_label)
-            storage = self._annotation_on(target_body, HasStorageSpace)
-        else:
-            storage = self._supporting_surface_annotation(target_label)
-
-        if storage is None:
-            raise RuntimeError(f"No storage space found for {target_label!r}")
-
-        if relation in INSIDE_RELATIONS:
-            relation_holds = is_inside_or_attached(object_body, storage.root)
-        else:
-            relation_holds = is_supported_by(object_body, storage.root)
-        if not relation_holds:
-            raise RuntimeError(
-                f"Placed object {object_label!r} does not satisfy "
-                f"{relation!r} at {target_label!r}"
-            )
+        object_annotation = self._required_root_annotation(
+            object_body,
+            object_label,
+        )
+        storage = self._storage_for(target_label, relation)
+        self._validate_storage_relation(
+            object_body,
+            storage,
+            object_label,
+            target_label,
+            relation,
+        )
 
         with self.world.modify_world():
             self._remove_storage_memberships(object_annotation)
-            storage.add_object(object_annotation)
+            self._register_with_storage(
+                object_annotation,
+                storage,
+                object_label,
+                target_label,
+                relation,
+            )
 
     def remove_from_storage(self, object_label):
         object_body = self.body(object_label)
-        object_annotation = self._annotation_on(object_body, HasRootBody)
-        if object_annotation is None:
-            raise RuntimeError(f"No storage annotation found for {object_label!r}")
+        object_annotation = self._required_root_annotation(
+            object_body,
+            object_label,
+        )
 
         with self.world.modify_world():
             self._remove_storage_memberships(object_annotation)
@@ -203,9 +204,76 @@ class Grounding:
         body_pose = body.global_pose
         return self._world_pose(float(body_pose.x), float(body_pose.y), 0.0)
 
-    # Placement helpers
+    def _storage_for(self, target_label, relation):
+        if relation in DIRECTIONAL_RELATIONS:
+            target_body = self.body(target_label)
+            storage = supporting_surface_of(self.world, target_body)
+        elif relation in INSIDE_RELATIONS:
+            target_body = self.body(target_label)
+            storage = self._annotation_on(target_body, HasStorageSpace)
+        else:
+            storage = self._supporting_surface_annotation(target_label)
 
-    def directional_pose(self, reference_label, obj_body, relation):
+        if storage is None:
+            raise GroundingConsistencyError(
+                f"No storage space found for {target_label!r}"
+            )
+        return storage
+
+    def _validate_storage_relation(
+        self,
+        object_body,
+        storage,
+        object_label,
+        target_label,
+        relation,
+    ):
+        if relation not in INSIDE_RELATIONS:
+            return
+        if is_inside_or_attached(object_body, storage.root):
+            return
+        raise self._unsatisfied_relation_error(
+            object_label,
+            target_label,
+            relation,
+        )
+
+    def _register_with_storage(
+        self,
+        object_annotation,
+        storage,
+        object_label,
+        target_label,
+        relation,
+    ):
+        if relation in INSIDE_RELATIONS:
+            storage.add_object(object_annotation)
+            return
+
+        storage.infer_objects_on_surface()
+        if object_annotation not in storage.objects:
+            raise self._unsatisfied_relation_error(
+                object_label,
+                target_label,
+                relation,
+            )
+
+    def _required_root_annotation(self, object_body, object_label):
+        annotation = self._annotation_on(object_body, HasRootBody)
+        if annotation is None:
+            raise GroundingConsistencyError(
+                f"No storage annotation found for {object_label!r}"
+            )
+        return annotation
+
+    @staticmethod
+    def _unsatisfied_relation_error(object_label, target_label, relation):
+        return GroundingConsistencyError(
+            f"Placed object {object_label!r} does not satisfy "
+            f"{relation!r} at {target_label!r}"
+        )
+
+    def directional_pose(self, reference_label, object_body, relation):
         if self.robot is None:
             raise GroundingError("directional placement needs a robot viewpoint")
 
@@ -216,15 +284,18 @@ class Grounding:
 
         reference_point = reference_body.global_pose.position
         viewpoint = self.robot.root.global_transform
-        matching_points = []
-        for point in self._surface_points(surface, obj_body):
+        # semDT samples free surface points but does not filter them by a
+        # viewpoint-dependent placement relation.
+        matching_points = [
+            point
+            for point in self._surface_points(surface, object_body)
             if directional_relation_holds(
                 point,
                 reference_point,
                 viewpoint,
                 relation,
-            ):
-                matching_points.append(point)
+            )
+        ]
 
         if not matching_points:
             raise GroundingError(
@@ -242,10 +313,11 @@ class Grounding:
         )
         return self._placement_pose(point)
 
-    def _inside_pose(self, container_body, obj_body):
-        # we just place obj in the middle
+    def _inside_pose(self, container_body, object_body):
+        # semDT offers containment predicates but no placement sampler for a
+        # container volume, so use its local mesh centre with object clearance.
         lower, upper = container_body.combined_mesh.bounds
-        object_height = obj_body.combined_mesh.extents[2]
+        object_height = object_body.combined_mesh.extents[2]
         clearance = 0.02
         local_point = Point3(
             x=float((lower[0] + upper[0]) / 2),
@@ -256,14 +328,16 @@ class Grounding:
         point = self.world.transform(local_point, self.world.root)
         return self._world_pose(float(point.x), float(point.y), float(point.z))
 
-    def _surface_points(self, surface, obj_body):
-        object_annotation = self._annotation_on(obj_body, HasRootBody)
+    def _surface_points(self, surface, object_body):
+        object_annotation = self._annotation_on(object_body, HasRootBody)
         points = surface.sample_points_from_surface(
             body_to_sample_for=object_annotation
         )
         return [self.world.transform(point, self.world.root) for point in points]
 
     def _placement_pose(self, point):
+        # A small overlap lets semDT's support predicate observe contact after
+        # pyCRAM places the object at the sampled surface pose.
         return self._world_pose(
             float(point.x),
             float(point.y),
@@ -285,8 +359,6 @@ class Grounding:
                 return annotation
         return None
 
-    # Lookup helpers
-
     def _annotations_on(self, body):
         return self.annotations_by_body.get(body, [])
 
@@ -297,6 +369,8 @@ class Grounding:
         return None
 
     def _remove_storage_memberships(self, object_annotation):
+        # HasStorageSpace has add_object but no inverse operation. pyCRAM already
+        # reparents the physical body, so only stale semantic memberships remain.
         storages = self.world.get_semantic_annotations_by_type(HasStorageSpace)
         for storage in storages:
             while object_annotation in storage.objects:

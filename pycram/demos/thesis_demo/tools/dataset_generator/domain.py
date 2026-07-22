@@ -1,3 +1,4 @@
+import random
 import re
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Literal
@@ -33,7 +34,6 @@ def normalise_words(value):
 
 @dataclass(frozen=True)
 class WorldContext:
-
     objects: tuple[str, ...]
     object_locations: dict[str, tuple[str, ...]]
     surfaces: tuple[str, ...]
@@ -117,7 +117,6 @@ class WorldContext:
 
 @dataclass(frozen=True)
 class Intent:
-
     action: Literal[
         "transport",
         "pickup",
@@ -132,17 +131,31 @@ class Intent:
     relation: str | None = None
     source_explicit: bool = False
 
+    def value_for(self, slot):
+        if slot == "action":
+            return self.action
+        if slot == "object":
+            return self.object
+        if slot == "source":
+            return self.source
+        if slot == "destination":
+            return self.destination
+        raise ValueError(f"Unknown intent slot: {slot!r}")
+
     def with_slot(self, slot, value):
+        if slot == "action":
+            return replace(self, action=value)
         if slot == "object":
             return replace(self, object=value)
         if slot == "source":
             return replace(self, source=value, source_explicit=True)
-        return replace(self, destination=value)
+        if slot == "destination":
+            return replace(self, destination=value)
+        raise ValueError(f"Unknown intent slot: {slot!r}")
 
 
 @dataclass(frozen=True)
 class Mention:
-
     slot: Slot
     text: str | None
     role: Role
@@ -158,7 +171,6 @@ class RenderedInstruction:
 
 @dataclass(frozen=True)
 class Resolution:
-
     status: Literal["resolved", "ambiguous", "missing"]
     intent: Intent
     slot: Slot | None = None
@@ -167,7 +179,6 @@ class Resolution:
 
 @dataclass(frozen=True)
 class PlanStep:
-
     action: str
     object: str | None = None
     location: str | None = None
@@ -179,8 +190,73 @@ class PlanStep:
 
 
 @dataclass(frozen=True)
-class Scenario:
+class WorldNames:
+    names: dict[str, str]
 
+    @classmethod
+    def natural(cls, context):
+        return cls({name: name for name in context.objects + context.places})
+
+    @classmethod
+    def opaque(cls, context, seed):
+        random_source = random.Random(seed)
+        assigned_names = {}
+        original_names = set(context.objects + context.places)
+        # pyCRAM has no training-name abstraction, so aliases are created here
+        # and kept separate from the names used to render natural language.
+        for role in ("object", "surface", "container", "furniture", "room"):
+            names = list(context.names_for_role(role))
+            random_source.shuffle(names)
+            opaque_names = []
+            number = 1
+            while len(opaque_names) < len(names):
+                opaque_name = f"{role}_{number}"
+                if opaque_name not in original_names:
+                    opaque_names.append(opaque_name)
+                number += 1
+            assigned_names.update(zip(names, opaque_names, strict=True))
+        return cls(assigned_names)
+
+    def name_for(self, name):
+        if name is None:
+            return None
+        return self.names[name]
+
+    def context_for(self, context):
+        return replace(
+            context,
+            objects=tuple(self.name_for(name) for name in context.objects),
+            object_locations={
+                self.name_for(name): tuple(
+                    self.name_for(location) for location in locations
+                )
+                for name, locations in context.object_locations.items()
+            },
+            surfaces=tuple(self.name_for(name) for name in context.surfaces),
+            containers=tuple(self.name_for(name) for name in context.containers),
+            openables=tuple(self.name_for(name) for name in context.openables),
+            furniture=tuple(self.name_for(name) for name in context.furniture),
+            rooms=tuple(self.name_for(name) for name in context.rooms),
+            types={
+                self.name_for(name): type_name
+                for name, type_name in context.types.items()
+            },
+        )
+
+    def plan_for(self, steps):
+        return tuple(
+            replace(
+                step,
+                object=self.name_for(step.object),
+                location=self.name_for(step.location),
+                source=self.name_for(step.source),
+            )
+            for step in steps
+        )
+
+
+@dataclass(frozen=True)
+class Scenario:
     id: str
     family: str
     world_id: str
@@ -199,7 +275,6 @@ class Scenario:
 
 @dataclass
 class RawExample:
-
     scenario_id: str
     family: str
     world_id: str

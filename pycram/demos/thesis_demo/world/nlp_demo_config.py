@@ -31,6 +31,7 @@ from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     Spoon,
     Table,
     TomatoSoup,
+    TrashCan,
     TunaCan,
     WineBottle,
 )
@@ -39,16 +40,42 @@ RESOURCES = os.path.join(os.path.dirname(__file__), "..", "..", "..", "resources
 OBJECTS_DIR = os.path.join(RESOURCES, "objects")
 
 
-@dataclass(frozen=True)
-class SurfaceSpec:
-    name: str
-    annotation_type: type
+@dataclass(eq=False)
+class KitchenIsland(CounterTop): ...
 
 
-@dataclass(frozen=True)
-class FixtureSpec:
-    name: str
-    annotation_type: type
+@dataclass(eq=False)
+class SinkCounter(CounterTop): ...
+
+
+@dataclass(eq=False)
+class OvenCounter(CounterTop): ...
+
+
+FURNITURE_ANNOTATION_TYPES = (
+    CoffeeTable,
+    CounterTop,
+    Dishwasher,
+    Fridge,
+    KitchenIsland,
+    OvenCounter,
+    Oven,
+    SideTable,
+    Sink,
+    SinkCounter,
+    Table,
+    TrashCan,
+)
+
+SURFACE_ANNOTATION_TYPES = (
+    CoffeeTable,
+    CounterTop,
+    KitchenIsland,
+    OvenCounter,
+    SideTable,
+    SinkCounter,
+    Table,
+)
 
 
 @dataclass(frozen=True)
@@ -57,6 +84,12 @@ class RoomSpec:
     name: str
     center: tuple[float, float]
     size: tuple[float, float]
+
+
+@dataclass(frozen=True)
+class FurnitureAnnotation:
+    annotation_type: type
+    body: str
 
 
 @dataclass(frozen=True)
@@ -84,32 +117,26 @@ class ContainedPlacement:
 class EnvironmentSpec:
     urdf: str
     robot_start: tuple[float, float, float]
-    surfaces: tuple[SurfaceSpec, ...]
-    fixtures: tuple[FixtureSpec, ...]
     rooms: tuple[RoomSpec, ...]
+    furniture: tuple[FurnitureAnnotation, ...]
     surface_objects: tuple[SurfacePlacement, ...]
     contained_objects: tuple[ContainedPlacement, ...]
 
 
-KITCHEN_SURFACES = (
-    SurfaceSpec("kitchen_island", CounterTop),
-    SurfaceSpec("sink_area", CounterTop),
-    SurfaceSpec("fridge_area", CounterTop),
-    SurfaceSpec("oven_area_area", CounterTop),
-    SurfaceSpec("kitchen_island_surface", CounterTop),
-    SurfaceSpec("sink_area_surface", CounterTop),
-    SurfaceSpec("table_area", Table),
-)
-
-KITCHEN_FIXTURES = (
-    FixtureSpec("sink_area_sink", Sink),
-    FixtureSpec("oven_area_oven_main", Oven),
-    FixtureSpec("iai_fridge_main", Fridge),
-)
-
 KITCHEN_ROOMS = (RoomSpec(Kitchen, "kitchen", (-1.0, 0.56), (5.6, 4.9)),)
 
-# Held-out evaluation inventory. IDs, types, and source relations are a contract.
+KITCHEN_FURNITURE = (
+    FurnitureAnnotation(KitchenIsland, "kitchen_island_surface"),
+    FurnitureAnnotation(SinkCounter, "sink_area_surface"),
+    FurnitureAnnotation(OvenCounter, "oven_area_area"),
+    FurnitureAnnotation(Table, "table_area"),
+    FurnitureAnnotation(Sink, "sink_area_sink"),
+    FurnitureAnnotation(Oven, "oven_area_oven_main"),
+    FurnitureAnnotation(Fridge, "iai_fridge_main"),
+    FurnitureAnnotation(TrashCan, "sink_area_trash_drawer_main"),
+)
+
+# Held-out evaluation inventory. Names, types, and source relations are a contract.
 KITCHEN_SURFACE_OBJECTS = (
     SurfacePlacement(
         WineBottle,
@@ -142,8 +169,29 @@ KITCHEN_SURFACE_OBJECTS = (
     SurfacePlacement(
         GelatinBox,
         "gelatinbox_counter",
-        "fridge_area",
+        "kitchen_island_surface",
+        (-0.20, -0.10),
+        scale=(0.06, 0.06, 0.08),
+    ),
+    SurfacePlacement(
+        TunaCan,
+        "tunacan_counter",
+        "table_area",
+        (0.0, -0.15),
+        scale=(0.06, 0.06, 0.08),
+    ),
+    SurfacePlacement(
+        Pringles,
+        "pringles",
+        "oven_area_area",
         (0.0, 0.0),
+        scale=(0.07, 0.07, 0.20),
+    ),
+    SurfacePlacement(
+        GelatinBox,
+        "gelatinbox",
+        "sink_area_surface",
+        (-0.15, 0.0),
         scale=(0.06, 0.06, 0.08),
     ),
 )
@@ -174,22 +222,6 @@ KITCHEN_CONTAINED_OBJECTS = (
         scale=(0.06, 0.06, 0.18),
     ),
     ContainedPlacement(
-        Pringles,
-        "pringles",
-        "iai_fridge_main",
-        Fridge,
-        (-0.10, 0.05, 0.0),
-        scale=(0.07, 0.07, 0.20),
-    ),
-    ContainedPlacement(
-        GelatinBox,
-        "gelatinbox",
-        "iai_fridge_main",
-        Fridge,
-        (0.10, 0.05, 0.0),
-        scale=(0.06, 0.06, 0.08),
-    ),
-    ContainedPlacement(
         TomatoSoup,
         "tomatosoup",
         "iai_fridge_main",
@@ -197,26 +229,47 @@ KITCHEN_CONTAINED_OBJECTS = (
         (0.0, 0.0, -0.10),
         scale=(0.06, 0.06, 0.10),
     ),
+    ContainedPlacement(
+        Spoon,
+        "spoon",
+        "kitchen_island_left_upper_drawer_main",
+        Drawer,
+        (-0.05, -0.08, 0.0),
+        scale=(0.18, 0.03, 0.02),
+    ),
+    ContainedPlacement(
+        Fork,
+        "fork",
+        "kitchen_island_left_upper_drawer_main",
+        Drawer,
+        (-0.05, 0.0, 0.0),
+        scale=(0.18, 0.02, 0.02),
+    ),
+    ContainedPlacement(
+        Knife,
+        "knife",
+        "kitchen_island_left_upper_drawer_main",
+        Drawer,
+        (-0.05, 0.08, 0.0),
+        scale=(0.18, 0.015, 0.02),
+    ),
 )
 
-
-APARTMENT_SURFACES = (
-    SurfaceSpec("island_countertop", CounterTop),
-    SurfaceSpec("countertop", CounterTop),
-    SurfaceSpec("table_area_main", Table),
-    SurfaceSpec("coffee_table", CoffeeTable),
-    SurfaceSpec("bedside_table", SideTable),
-)
-
-APARTMENT_FIXTURES = (
-    FixtureSpec("sink", Sink),
-    FixtureSpec("oven", Oven),
-    FixtureSpec("cabinet7", Dishwasher),
-)
 
 APARTMENT_ROOMS = (
     RoomSpec(Kitchen, "kitchen", (3.0, 2.5), (6.0, 4.5)),
     RoomSpec(LivingRoom, "living_room", (17.0, 2.5), (3.5, 4.5)),
+)
+
+APARTMENT_FURNITURE = (
+    FurnitureAnnotation(CounterTop, "island_countertop"),
+    FurnitureAnnotation(CounterTop, "countertop"),
+    FurnitureAnnotation(Table, "table_area_main"),
+    FurnitureAnnotation(CoffeeTable, "coffee_table"),
+    FurnitureAnnotation(SideTable, "bedside_table"),
+    FurnitureAnnotation(Sink, "sink"),
+    FurnitureAnnotation(Oven, "oven"),
+    FurnitureAnnotation(Dishwasher, "cabinet7"),
 )
 
 APARTMENT_SURFACE_OBJECTS = (
@@ -316,18 +369,16 @@ ENVIRONMENTS = {
     "apartment": EnvironmentSpec(
         urdf=os.path.join(RESOURCES, "worlds", "apartment.urdf"),
         robot_start=(1.5, 2.5, 0.0),
-        surfaces=APARTMENT_SURFACES,
-        fixtures=APARTMENT_FIXTURES,
         rooms=APARTMENT_ROOMS,
+        furniture=APARTMENT_FURNITURE,
         surface_objects=APARTMENT_SURFACE_OBJECTS,
         contained_objects=APARTMENT_CONTAINED_OBJECTS,
     ),
     "kitchen": EnvironmentSpec(
         urdf=os.path.join(RESOURCES, "worlds", "kitchen-small.urdf"),
         robot_start=(0.3, 0.8, 0.0),
-        surfaces=KITCHEN_SURFACES,
-        fixtures=KITCHEN_FIXTURES,
         rooms=KITCHEN_ROOMS,
+        furniture=KITCHEN_FURNITURE,
         surface_objects=KITCHEN_SURFACE_OBJECTS,
         contained_objects=KITCHEN_CONTAINED_OBJECTS,
     ),

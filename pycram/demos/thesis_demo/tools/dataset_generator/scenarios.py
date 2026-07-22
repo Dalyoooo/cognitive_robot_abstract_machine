@@ -1,14 +1,14 @@
 from dataclasses import replace
 
-from ...validation.schema import DIRECTIONAL_RELATIONS
-from .domain import Intent, PlanStep, Scenario
-from .resolver import matching_names, natural_reference
-from .policy import (
+from thesis_demo.tools.dataset_generator.domain import Intent, PlanStep, Scenario
+from thesis_demo.tools.dataset_generator.policy import (
     check_destination,
     include_source,
     resolve_source,
     storage_containers,
 )
+from thesis_demo.tools.dataset_generator.resolver import matching_names, natural_reference
+from thesis_demo.validation.schema import DIRECTIONAL_RELATIONS
 
 TRANSPORT_FAMILIES = {
     "transport_surface_surface": ("surface", "surface"),

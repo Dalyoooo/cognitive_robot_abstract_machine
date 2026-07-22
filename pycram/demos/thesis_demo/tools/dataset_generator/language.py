@@ -1,4 +1,4 @@
-from .domain import Mention, RenderedInstruction
+from thesis_demo.tools.dataset_generator.domain import Mention, RenderedInstruction
 
 TRANSPORT_TEMPLATES = (
     "Move the {object} {preposition} the {destination}.",

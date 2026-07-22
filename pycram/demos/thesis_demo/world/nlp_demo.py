@@ -3,7 +3,12 @@ import time
 import xml.etree.ElementTree as ET
 from itertools import combinations
 
-from .nlp_demo_config import ENVIRONMENTS, OBJECT_COLORS, OBJECTS_DIR
+from .nlp_demo_config import (
+    ENVIRONMENTS,
+    OBJECT_COLORS,
+    OBJECTS_DIR,
+    SURFACE_ANNOTATION_TYPES,
+)
 from pycram.datastructures.dataclasses import Context
 from semantic_digital_twin.adapters.mesh import STLParser
 from semantic_digital_twin.adapters.urdf import URDFParser
@@ -14,15 +19,16 @@ from semantic_digital_twin.robots.hsrb import HSRB
 from semantic_digital_twin.robots.pr2 import PR2
 from semantic_digital_twin.robots.tiago import Tiago
 from semantic_digital_twin.semantic_annotations.mixins import (
+    HasDoors,
+    HasDrawers,
+    HasRootBody,
     HasStorageSpace,
     HasSupportingSurface,
 )
 from semantic_digital_twin.semantic_annotations.semantic_annotations import (
-    Dishwasher,
     Door,
     Drawer,
     Floor,
-    Fridge,
 )
 from semantic_digital_twin.spatial_types.spatial_types import (
     HomogeneousTransformationMatrix,
@@ -51,6 +57,85 @@ ROBOTS = {
     "hsrb": (HSRB, OmniDrive),
     "tiago": (Tiago, DifferentialDrive),
 }
+
+
+class FurnitureAnnotationError(RuntimeError):
+    pass
+
+
+def annotate_furniture(world, furniture):
+    for declared in furniture:
+        annotation = _resolve_or_create_annotation(world, declared)
+        _require_door(declared, annotation)
+        _ensure_supporting_region(declared, annotation, world)
+
+
+def _resolve_or_create_annotation(world, declared):
+    body = world.get_body_by_name(declared.body)
+    matches = [
+        annotation
+        for annotation in world.get_semantic_annotations_by_type(
+            declared.annotation_type
+        )
+        if type(annotation) is declared.annotation_type and annotation.root is body
+    ]
+    if len(matches) > 1:
+        raise FurnitureAnnotationError(
+            f"Multiple {declared.annotation_type.__name__} annotations "
+            f"on {declared.body!r}"
+        )
+    if matches:
+        return matches[0]
+    return _create_annotation(world, body, declared.annotation_type)
+
+
+def _create_annotation(world, body, annotation_type):
+    attributes = {"root": body}
+    if issubclass(annotation_type, HasDoors):
+        attributes["doors"] = _branch_annotations(world, body, Door)
+    if issubclass(annotation_type, HasDrawers):
+        attributes["drawers"] = _branch_annotations(world, body, Drawer)
+    annotation = annotation_type(**attributes)
+
+    with world.modify_world():
+        if isinstance(annotation, (HasDoors, HasDrawers)):
+            world.add_semantic_annotation_recursively(annotation)
+        else:
+            world.add_semantic_annotation(annotation)
+    return annotation
+
+
+def _branch_annotations(world, root, annotation_type):
+    branch = set(world.get_kinematic_structure_entities_of_branch(root))
+    return [
+        annotation
+        for annotation in world.get_semantic_annotations_by_type(annotation_type)
+        if annotation.root in branch
+    ]
+
+
+def _require_door(declared, annotation):
+    if not isinstance(annotation, HasDoors):
+        return
+    if annotation.doors:
+        return
+    raise FurnitureAnnotationError(
+        f"WorldReasoner did not infer a door for "
+        f"{declared.annotation_type.__name__} {declared.body!r}"
+    )
+
+
+def _ensure_supporting_region(declared, annotation, world):
+    if type(annotation) not in SURFACE_ANNOTATION_TYPES:
+        return
+    if annotation.supporting_surface is not None:
+        return
+    with world.modify_world():
+        region = annotation.calculate_supporting_surface()
+    if region is None:
+        raise FurnitureAnnotationError(
+            f"Could not calculate a supporting surface for {declared.body!r}"
+        )
 
 
 def _primitive(name, scale):
@@ -88,9 +173,8 @@ def get_annotation(world, body_name, annotation_type, *, usable_surface=False):
     body = world.get_body_by_name(body_name)
     matches = [
         annotation
-        for annotation in world.semantic_annotations
-        if isinstance(annotation, annotation_type)
-        and getattr(annotation, "root", None) is body
+        for annotation in world.get_semantic_annotations_by_type(annotation_type)
+        if annotation.root is body
         and (not usable_surface or annotation.supporting_surface is not None)
     ]
     if len(matches) != 1:
@@ -100,84 +184,6 @@ def get_annotation(world, body_name, annotation_type, *, usable_surface=False):
             f"annotation on {body_name!r}, found {len(matches)}"
         )
     return matches[0]
-
-
-def _ensure_surface(world, spec):
-    body = world.get_body_by_name(spec.name)
-    matches = [
-        annotation
-        for annotation in world.semantic_annotations
-        if type(annotation) is spec.annotation_type
-        and getattr(annotation, "root", None) is body
-    ]
-    if len(matches) > 1:
-        raise RuntimeError(
-            f"Multiple {spec.annotation_type.__name__} annotations on {spec.name!r}"
-        )
-
-    with world.modify_world():
-        surface = matches[0] if matches else spec.annotation_type(root=body)
-        if not matches:
-            world.add_semantic_annotation(surface)
-        if surface.supporting_surface is None:
-            supporting_region = surface.calculate_supporting_surface()
-            if supporting_region is None:
-                raise RuntimeError(
-                    f"Could not calculate a supporting surface for {spec.name!r}"
-                )
-    return surface
-
-
-def _branch_annotations(world, root, annotation_type):
-    branch = set(world.get_kinematic_structure_entities_of_branch(root))
-    return [
-        annotation
-        for annotation in world.semantic_annotations
-        if isinstance(annotation, annotation_type)
-        and getattr(annotation, "root", None) in branch
-    ]
-
-
-def _ensure_fixture(world, spec):
-    body = world.get_body_by_name(spec.name)
-    matches = [
-        annotation
-        for annotation in world.semantic_annotations
-        if type(annotation) is spec.annotation_type
-        and getattr(annotation, "root", None) is body
-    ]
-    if len(matches) > 1:
-        raise RuntimeError(
-            f"Multiple {spec.annotation_type.__name__} annotations on {spec.name!r}"
-        )
-    if matches:
-        fixture = matches[0]
-    elif spec.annotation_type is Fridge:
-        raise RuntimeError(
-            f"WorldReasoner did not infer the articulated fridge {spec.name!r}"
-        )
-    elif spec.annotation_type is Dishwasher:
-        fixture = Dishwasher(
-            root=body,
-            doors=_branch_annotations(world, body, Door),
-            drawers=_branch_annotations(world, body, Drawer),
-        )
-        if not fixture.doors:
-            raise RuntimeError(
-                f"WorldReasoner did not infer a door for dishwasher {spec.name!r}"
-            )
-        with world.modify_world():
-            world.add_semantic_annotation_recursively(fixture)
-    else:
-        fixture = spec.annotation_type(root=body)
-        with world.modify_world():
-            world.add_semantic_annotation(fixture)
-
-    if isinstance(fixture, (Dishwasher, Fridge)) and not fixture.doors:
-        raise RuntimeError(
-            f"{type(fixture).__name__} {spec.name!r} has no inferred door"
-        )
-    return fixture
 
 
 def _add_room(world, spec):
@@ -198,7 +204,7 @@ def _add_room(world, spec):
                 *spec.center
             ),
         )
-        # The room floor is semantic only; the URDF already has collision floors.
+        # The room floor is semantic only. The URDF already has collision floors.
         floor.root.collision = ShapeCollection([])
         world.add_semantic_annotation(
             spec.annotation_type(floor=floor, name=PrefixedName(spec.name))
@@ -277,14 +283,10 @@ def _place_contained_objects(world, placements):
 
     # Storage registration also reparents through semDT's public storage API.
     for placement in placements:
-        container = get_annotation(
-            world, placement.container, placement.container_type
-        )
+        container = get_annotation(world, placement.container, placement.container_type)
         if not isinstance(container, HasStorageSpace):
             continue
-        stored_object = get_annotation(
-            world, placement.name, placement.annotation_type
-        )
+        stored_object = get_annotation(world, placement.name, placement.annotation_type)
         with world.modify_world():
             container.add_object(stored_object)
 
@@ -353,24 +355,13 @@ def _validate_object_separation(world, spec):
 def _validate_environment(world, spec):
     world.validate()
 
-    for surface_spec in spec.surfaces:
-        surface = get_annotation(
-            world, surface_spec.name, surface_spec.annotation_type
-        )
-        if surface.supporting_surface is None:
-            raise RuntimeError(
-                f"Surface {surface_spec.name!r} has no supporting region"
-            )
-
-    for fixture_spec in spec.fixtures:
-        get_annotation(world, fixture_spec.name, fixture_spec.annotation_type)
-
     for room_spec in spec.rooms:
         rooms = [
             room
-            for room in world.semantic_annotations
-            if isinstance(room, room_spec.annotation_type)
-            and str(room.name) == room_spec.name
+            for room in world.get_semantic_annotations_by_type(
+                room_spec.annotation_type
+            )
+            if str(room.name) == room_spec.name
         ]
         if len(rooms) != 1:
             raise RuntimeError(
@@ -379,11 +370,8 @@ def _validate_environment(world, spec):
             )
 
     root_annotations = {}
-    for annotation in world.semantic_annotations:
-        root = getattr(annotation, "root", None)
-        if root is None:
-            continue
-        key = (type(annotation), root)
+    for annotation in world.get_semantic_annotations_by_type(HasRootBody):
+        key = (type(annotation), annotation.root)
         root_annotations[key] = root_annotations.get(key, 0) + 1
     duplicates = [
         (annotation_type.__name__, str(root.name))
@@ -421,9 +409,7 @@ def _validate_environment(world, spec):
         object_annotation = get_annotation(
             world, placement.name, placement.annotation_type
         )
-        container = get_annotation(
-            world, placement.container, placement.container_type
-        )
+        container = get_annotation(world, placement.container, placement.container_type)
         if body.parent_kinematic_structure_entity is not parent:
             raise RuntimeError(
                 f"{placement.name!r} is not attached to {placement.container!r}"
@@ -443,20 +429,7 @@ def _validate_environment(world, spec):
 def _build_environment(spec):
     urdf_root = ET.parse(spec.urdf).getroot()
 
-    # Work around two upstream URDF defects locally instead of changing CRAM
-    # data (D16); each patch becomes a no-op once upstream fixes the file:
-    # - iai_apartment: the coffe_machine link's collision carries a <material>
-    #   element that breaks mesh coloring for the whole model.
-    # - kitchen/kitchen-small URDFs: oven_area_area_left_drawer_main_joint
-    #   contains a duplicate <limit>, which would freeze the drawer.
-    coffee_machine_collision = urdf_root.find(
-        "./link[@name='coffe_machine']/collision"
-    )
-    if coffee_machine_collision is not None:
-        collision_material = coffee_machine_collision.find("material")
-        if collision_material is not None:
-            coffee_machine_collision.remove(collision_material)
-
+    # The kitchen URDF contains a duplicate limit that would freeze the drawer.
     left_drawer_joint = urdf_root.find(
         "./joint[@name='oven_area_area_left_drawer_main_joint']"
     )
@@ -464,17 +437,12 @@ def _build_environment(spec):
         for duplicate_limit in left_drawer_joint.findall("limit")[1:]:
             left_drawer_joint.remove(duplicate_limit)
 
-    world = URDFParser(
-        urdf=ET.tostring(urdf_root, encoding="unicode")
-    ).parse()
+    world = URDFParser(urdf=ET.tostring(urdf_root, encoding="unicode")).parse()
 
     # Keep household inference isolated from robot links and robot part names.
     WorldReasoner(world).infer_semantic_annotations()
+    annotate_furniture(world, spec.furniture)
 
-    for surface_spec in spec.surfaces:
-        _ensure_surface(world, surface_spec)
-    for fixture_spec in spec.fixtures:
-        _ensure_fixture(world, fixture_spec)
     for room_spec in spec.rooms:
         _add_room(world, room_spec)
 
@@ -531,7 +499,7 @@ def _clear_markers(node, topic="/semworld/viz_marker", timeout=5.0):
 
     # Deterministic wait instead of fixed sleeps: only clear once a
     # subscriber (RViz) actually matched. The clear matters only on
-    # environment/robot switches with a long-lived RViz; same-map rebuilds
+    # environment/robot switches with a long-lived RViz. Same-map rebuilds
     # are covered by marker overwrite, headless runs publish nothing.
     deadline = time.monotonic() + timeout
     while publisher.get_subscription_count() == 0 and time.monotonic() < deadline:
@@ -550,10 +518,8 @@ def _start_visualization(world):
         VizMarkerPublisher,
     )
 
-    try:
+    if not rclpy.ok():
         rclpy.init()
-    except RuntimeError:
-        pass
     node = rclpy.create_node("viz_marker")
     _clear_markers(node)
     VizMarkerPublisher(_world=world, node=node).with_tf_publisher()

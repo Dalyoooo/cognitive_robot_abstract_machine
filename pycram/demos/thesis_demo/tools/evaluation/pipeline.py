@@ -773,7 +773,7 @@ def validate_demo_world(cases, session, config):
         session.setup_world("hsrb", "kitchen")
         wait_for_world(session, config)
         context = world_context(session)
-        validate_kitchen_inventory(context, "live Kitchen")
+        validate_kitchen_inventory(context, cases, "live Kitchen")
         for case in cases:
             validate_entities(case, context, "live Kitchen")
     finally:

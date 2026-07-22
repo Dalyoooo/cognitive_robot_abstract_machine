@@ -2,39 +2,55 @@ import argparse
 import json
 import random
 from collections import Counter
-from dataclasses import asdict
+from dataclasses import replace
+from enum import Enum, auto
 from pathlib import Path
 
-from ...planner.prompt import system_prompt, user_turn
-
-from .catalog import DEFAULT_CATALOG_PATH, SCHEMA_VERSION, SemanticCatalog
-from .counterfactual import make_counterfactual_scenario
-from .domain import Mention, RawExample
-from .language import render_instruction
-from .resolver import (
+from thesis_demo.planner.prompt import system_prompt, user_turn
+from thesis_demo.tools.dataset_generator.catalog import (
+    DEFAULT_CATALOG_PATH,
+    SCHEMA_VERSION,
+    SemanticCatalog,
+)
+from thesis_demo.tools.dataset_generator.domain import Mention, RawExample, WorldNames
+from thesis_demo.tools.dataset_generator.language import render_instruction
+from thesis_demo.tools.dataset_generator.resolver import (
     clarification_question,
     natural_reference,
     resolve_mentions,
 )
-from .scenarios import FAMILIES, ScenarioSampler, compile_plan
-from .validate import (
+from thesis_demo.tools.dataset_generator.scenarios import (
+    FAMILIES,
+    ScenarioSampler,
+    compile_plan,
+)
+from thesis_demo.tools.dataset_generator.validate import (
     validate_messages,
     validate_plan,
     validate_unique_examples,
 )
-from .world import (
+from thesis_demo.tools.dataset_generator.world import (
     DEFAULT_HOLDOUT_PATH,
     HoldoutPolicy,
     WorldComposer,
 )
 
-VARIABLE_AMBIGUITY_FAMILIES = {
-    "clarify_open_container",
-    "clarify_destination",
-}
+VARIABLE_AMBIGUITY_FAMILIES = frozenset(
+    {"clarify_open_container", "clarify_destination"}
+)
 MAX_SAMPLING_ATTEMPTS = 30
 MIN_AMBIGUITY_SIZE = 2
 MAX_AMBIGUITY_SIZE = 12
+
+
+class NameStyle(Enum):
+    NATURAL = auto()
+    OPAQUE = auto()
+
+    def world_names(self, context, seed):
+        if self is NameStyle.NATURAL:
+            return WorldNames.natural(context)
+        return WorldNames.opaque(context, seed)
 
 
 def _json(value):
@@ -44,7 +60,7 @@ def _json(value):
 def _selected_value(scenario, resolution):
     if resolution.slot is None:
         raise ValueError("clarification has no unresolved slot")
-    wanted = getattr(scenario.intent, resolution.slot)
+    wanted = scenario.intent.value_for(resolution.slot)
     if wanted in resolution.candidates:
         return str(wanted)
     if resolution.candidates:
@@ -84,7 +100,9 @@ def _resolve_scenario(scenario, rendered, catalog):
     clauses = rendered.clauses or (rendered,)
     resolutions = []
     for intent, clause in zip(scenario.intents(), clauses, strict=True):
-        resolution = resolve_mentions(intent, clause.mentions, scenario.context, catalog)
+        resolution = resolve_mentions(
+            intent, clause.mentions, scenario.context, catalog
+        )
         resolutions.append(resolution)
     resolutions = tuple(resolutions)
     expects_clarification = scenario.family.startswith("clarify_")
@@ -160,8 +178,18 @@ def _compile_intents(intents, context, catalog):
     return tuple(steps)
 
 
-def build_example_from_rendered(scenario, rendered, catalog):
-    context = scenario.context
+def build_example_from_rendered(
+    scenario,
+    rendered,
+    catalog,
+    name_style=NameStyle.NATURAL,
+):
+    natural_context = scenario.context
+    world_names = name_style.world_names(
+        natural_context,
+        seed=f"{scenario.id}:world-names",
+    )
+    context = world_names.context_for(natural_context)
     context_dict = context.to_dict()
     resolutions, expects_clarification = _resolve_scenario(
         scenario,
@@ -184,7 +212,8 @@ def build_example_from_rendered(scenario, rendered, catalog):
     else:
         final_intents = tuple(item.intent for item in resolutions)
 
-    plan = _compile_intents(final_intents, context, catalog)
+    natural_plan = _compile_intents(final_intents, natural_context, catalog)
+    plan = world_names.plan_for(natural_plan)
     messages.append(
         {
             "role": "assistant",
@@ -201,10 +230,11 @@ def build_example_from_rendered(scenario, rendered, catalog):
         clarification=clarification,
         template_id=rendered.template_id,
         metadata={
-            "resolution": "+".join(resolution.status for resolution in resolutions)
+            "resolution": "+".join(resolution.status for resolution in resolutions),
+            "name_style": name_style.name.casefold(),
         },
     )
-    validate_messages(example)
+    validate_messages(example, natural_context)
     return example, rendered
 
 
@@ -226,6 +256,8 @@ def _generate_example(composer, sampler, catalog, family, family_index, serial, 
     for attempt in range(MAX_SAMPLING_ATTEMPTS):
         rng = random.Random(f"{seed}:{family}:{family_index}:{attempt}")
         try:
+            # Random candidates may violate semantic constraints. Retrying with
+            # the attempt seed keeps rejection deterministic and reproducible.
             context = _compose_context(composer, family, family_index, rng)
             scenario = sampler.sample(
                 family,
@@ -246,27 +278,32 @@ def _generate_example(composer, sampler, catalog, family, family_index, serial, 
     ) from last_error
 
 
-def _context_pair(scenario, example, rendered, catalog):
-    counterfactual_scenario = make_counterfactual_scenario(scenario)
-    if counterfactual_scenario is None:
-        return ((scenario, example, rendered),)
-
-    counterfactual, _ = build_example_from_rendered(
-        counterfactual_scenario,
+def _name_pair(scenario, natural_example, rendered, catalog):
+    opaque_example, _ = build_example_from_rendered(
+        scenario,
         rendered,
         catalog,
+        NameStyle.OPAQUE,
     )
-    if counterfactual.plan == example.plan:
-        raise ValueError("counterfactual context did not change the target plan")
+    if opaque_example.plan == natural_example.plan:
+        raise ValueError("opaque names did not change the grounded plan")
 
-    pair_id = scenario.id
-    example.metadata.update({"pair_id": pair_id, "context_variant": "base"})
-    counterfactual.metadata.update(
-        {"pair_id": pair_id, "context_variant": "counterfactual"}
+    pair_name = scenario.id
+    opaque_scenario = replace(
+        scenario,
+        id=f"{scenario.id}-opaque",
+        world_id=f"{scenario.world_id}-opaque",
     )
+    opaque_example = replace(
+        opaque_example,
+        scenario_id=opaque_scenario.id,
+        world_id=opaque_scenario.world_id,
+    )
+    natural_example.metadata.update({"pair_name": pair_name})
+    opaque_example.metadata.update({"pair_name": pair_name})
     return (
-        (scenario, example, rendered),
-        (counterfactual_scenario, counterfactual, rendered),
+        (scenario, natural_example, rendered),
+        (opaque_scenario, opaque_example, rendered),
     )
 
 
@@ -289,7 +326,7 @@ def generate_base_examples(composer, sampler, catalog, *, per_family, seed):
             serial,
             seed,
         )
-        for paired_scenario, paired_example, paired_rendered in _context_pair(
+        for paired_scenario, paired_example, paired_rendered in _name_pair(
             scenario,
             example,
             rendered,
@@ -304,9 +341,9 @@ def generate_base_examples(composer, sampler, catalog, *, per_family, seed):
 def split_examples(examples, seed):
     by_family = {}
     for example in examples:
-        group_id = example.metadata.get("pair_id", example.scenario_id)
+        group_name = example.metadata.get("pair_name", example.scenario_id)
         family_groups = by_family.setdefault(example.family, {})
-        family_groups.setdefault(group_id, []).append(example)
+        family_groups.setdefault(group_name, []).append(example)
 
     train = []
     val = []
@@ -325,18 +362,8 @@ def split_examples(examples, seed):
     return train, val
 
 
-def _training_row(example, split):
-    return {
-        "messages": example.messages,
-        "metadata": {
-            "scenario_id": example.scenario_id,
-            "family": example.family,
-            "world_id": example.world_id,
-            "template_id": example.template_id,
-            "split": split,
-            **example.metadata,
-        },
-    }
+def _training_row(example):
+    return {"messages": example.messages}
 
 
 def _write_jsonl(path, rows):
@@ -345,20 +372,8 @@ def _write_jsonl(path, rows):
             output.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 
-def _scenario_row(scenario):
-    return {
-        "id": scenario.id,
-        "family": scenario.family,
-        "world_id": scenario.world_id,
-        "intents": [asdict(intent) for intent in scenario.intents()],
-        "reference_sets": list(scenario.reference_sets()),
-        "context": scenario.context.to_dict(),
-    }
-
-
 def write_dataset(
     output_dir,
-    scenarios,
     train,
     val,
     *,
@@ -369,23 +384,12 @@ def write_dataset(
     all_examples = train + val
     _write_jsonl(
         output_dir / "train.jsonl",
-        (_training_row(row, "train") for row in train),
+        (_training_row(row) for row in train),
     )
     _write_jsonl(
         output_dir / "val.jsonl",
-        (_training_row(row, "val") for row in val),
+        (_training_row(row) for row in val),
     )
-    _write_jsonl(output_dir / "scenarios.jsonl", map(_scenario_row, scenarios))
-
-    first_by_family = {}
-    for item in all_examples:
-        first_by_family.setdefault(item.family, item)
-    review = [
-        _training_row(first_by_family[family], "review")
-        for family in FAMILIES
-        if family in first_by_family
-    ]
-    _write_jsonl(output_dir / "review.jsonl", review)
 
     manifest = {
         "schema_version": SCHEMA_VERSION,
@@ -426,7 +430,7 @@ def main():
     holdout = HoldoutPolicy.load(args.holdout)
     composer = WorldComposer(catalog, holdout)
     sampler = ScenarioSampler(catalog)
-    scenarios, examples, _ = generate_base_examples(
+    _scenarios, examples, _rendered = generate_base_examples(
         composer,
         sampler,
         catalog,
@@ -439,7 +443,6 @@ def main():
     train, val = split_examples(examples, args.seed)
     write_dataset(
         args.out_dir,
-        scenarios,
         train,
         val,
         seed=args.seed,

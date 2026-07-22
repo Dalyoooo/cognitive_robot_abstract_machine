@@ -146,17 +146,16 @@ def detect_config(model_name):
     return FALLBACK_FAMILY
 
 
-def _token_lookup(tokenizer):
+def text_tokenizer(tokenizer):
     if hasattr(tokenizer, "tokenizer"):
         return tokenizer.tokenizer
     return tokenizer
 
 
 def _token_is_known(tokenizer, token):
-    """Whether a token maps to a real id rather than the unknown token."""
     if not token:
         return False
-    lookup = _token_lookup(tokenizer)
+    lookup = text_tokenizer(tokenizer)
     if hasattr(lookup, "convert_tokens_to_ids"):
         token_id = lookup.convert_tokens_to_ids(token)
         return token_id is not None and token_id != lookup.unk_token_id

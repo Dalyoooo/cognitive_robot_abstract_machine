@@ -30,6 +30,7 @@ from thesis_demo.tools.training.config import (
     detect_config,
     load_dataset,
     parse_args,
+    text_tokenizer,
     validate_direct_conversations as _validate_direct_conversations,
 )
 from thesis_demo.validation.guard import verify
@@ -264,7 +265,10 @@ def _build_trainer(args, model, tokenizer, train_dataset, val_dataset, output_di
 
 
 def _check_response_mask(trainer, tokenizer):
-    space_id = tokenizer(" ", add_special_tokens=False).input_ids[0]
+    # A multimodal processor routes a positional argument to its image channel,
+    # so tokenize the space through the underlying text tokenizer.
+    text_only = text_tokenizer(tokenizer)
+    space_id = text_only(" ", add_special_tokens=False).input_ids[0]
     sample_labels = trainer.train_dataset[0]["labels"]
     supervised_tokens = sum(label != -100 for label in sample_labels)
     if supervised_tokens == 0:
@@ -274,7 +278,7 @@ def _check_response_mask(trainer, tokenizer):
         )
     visible_labels = [space_id if label == -100 else label for label in sample_labels]
     print(f">>> Response-only check: {supervised_tokens} supervised tokens in sample 0")
-    print(tokenizer.decode(visible_labels[:300]))
+    print(text_only.decode(visible_labels[:300]))
 
 
 def _apply_peft(model, args, peft_strategy):

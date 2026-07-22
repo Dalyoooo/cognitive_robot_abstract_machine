@@ -146,26 +146,45 @@ def detect_config(model_name):
     return FALLBACK_FAMILY
 
 
+def _token_lookup(tokenizer):
+    if hasattr(tokenizer, "tokenizer"):
+        return tokenizer.tokenizer
+    return tokenizer
+
+
+def _token_is_known(tokenizer, token):
+    """Whether a token maps to a real id rather than the unknown token."""
+    if not token:
+        return False
+    lookup = _token_lookup(tokenizer)
+    if hasattr(lookup, "convert_tokens_to_ids"):
+        token_id = lookup.convert_tokens_to_ids(token)
+        return token_id is not None and token_id != lookup.unk_token_id
+    if hasattr(lookup, "get_vocab"):
+        return token in lookup.get_vocab()
+    # No way to verify; trust the token Unsloth configured.
+    return True
+
+
 def configure_chat_template(tokenizer, template=None):
     """Configure and validate tokenizer chat, EOS, and padding settings."""
     original_eos = tokenizer.eos_token
     if template:
         tokenizer = get_chat_template(tokenizer, chat_template=template)
 
-    vocab = tokenizer.get_vocab() if hasattr(tokenizer, "get_vocab") else {}
     eos = tokenizer.eos_token
-    if eos not in vocab:
+    if not _token_is_known(tokenizer, eos):
         fallback = next(
             (
                 token
                 for token in (original_eos, "<|im_end|>", "<|endoftext|>")
-                if token and token in vocab
+                if _token_is_known(tokenizer, token)
             ),
             None,
         )
         if fallback is None:
             raise ValueError(
-                f"Tokenizer EOS token {eos!r} is not in its vocabulary and no "
+                f"Tokenizer EOS token {eos!r} is not a known token and no "
                 "known fallback token is available."
             )
         tokenizer.eos_token = fallback

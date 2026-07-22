@@ -1,5 +1,10 @@
 import argparse
+import json
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
 
+from datasets import Dataset
 from unsloth.chat_templates import get_chat_template
 
 DEFAULT_TARGET_MODULES = (
@@ -12,29 +17,63 @@ DEFAULT_TARGET_MODULES = (
     "down_proj",
 )
 
-MODEL_CONFIGS = {
-    "qwen": {
-        "template": None,
-        "instruction_part": "<|im_start|>user\n",
-        "response_part": "<|im_start|>assistant\n",
-        "load_in_4bit": True,
-        "target_modules": list(DEFAULT_TARGET_MODULES),
-    },
-    "gemma-4": {
-        "template": None,
-        "instruction_part": "<|turn>user\n",
-        "response_part": "<|turn>model\n",
-        "load_in_4bit": True,
-        "target_modules": list(DEFAULT_TARGET_MODULES),
-    },
-    "llama-3": {
-        "template": "llama-3.1",
-        "instruction_part": "<|start_header_id|>user<|end_header_id|>\n\n",
-        "response_part": "<|start_header_id|>assistant<|end_header_id|>\n\n",
-        "load_in_4bit": True,
-        "target_modules": list(DEFAULT_TARGET_MODULES),
-    },
-}
+SUPPORTED_ROLES = frozenset({"system", "user", "assistant"})
+
+
+class PeftStrategy(Enum):
+    """Selects which layers get LoRA adapters for a model family."""
+
+    TEXT_MODULES = "text_modules"
+    MULTIMODAL_LAYERS = "multimodal_layers"
+
+
+@dataclass
+class ModelFamilyConfig:
+    match_keys: object
+    template: object
+    instruction_part: object
+    response_part: object
+    peft_strategy: object
+    load_in_4bit: object = True
+
+    def matches(self, model_name):
+        lowered = model_name.lower()
+        return any(key in lowered for key in self.match_keys)
+
+
+FAMILY_CONFIGS = (
+    ModelFamilyConfig(
+        match_keys=("llama-3",),
+        template="llama-3.1",
+        instruction_part="<|start_header_id|>user<|end_header_id|>\n\n",
+        response_part="<|start_header_id|>assistant<|end_header_id|>\n\n",
+        peft_strategy=PeftStrategy.TEXT_MODULES,
+    ),
+    ModelFamilyConfig(
+        match_keys=("qwen",),
+        template=None,
+        instruction_part="<|im_start|>user\n",
+        response_part="<|im_start|>assistant\n",
+        peft_strategy=PeftStrategy.TEXT_MODULES,
+    ),
+    ModelFamilyConfig(
+        match_keys=("gemma-4",),
+        template="gemma-4",
+        instruction_part="<|turn>user\n",
+        response_part="<|turn>model\n",
+        peft_strategy=PeftStrategy.MULTIMODAL_LAYERS,
+    ),
+)
+
+FALLBACK_FAMILY = FAMILY_CONFIGS[0]
+
+EXAMPLE_MODELS = (
+    "unsloth/Meta-Llama-3.1-8B-Instruct-unsloth-bnb-4bit",
+    "unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
+    "unsloth/Qwen3.5-4B",
+    "unsloth/gemma-4-E2B-it",
+    "unsloth/gemma-4-E4B-it",
+)
 
 
 def parse_args():
@@ -45,7 +84,7 @@ def parse_args():
     parser.add_argument(
         "--model",
         default="unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
-        help="Base model for Unsloth",
+        help="Base model for Unsloth. Examples: " + ", ".join(EXAMPLE_MODELS),
     )
     parser.add_argument(
         "--data-dir",
@@ -96,16 +135,15 @@ def parse_args():
 
 
 def detect_config(model_name):
-    """Return the response markers for a supported model family."""
-    name_lower = model_name.lower()
-    for key, config in MODEL_CONFIGS.items():
-        if key in name_lower:
+    """Return the response markers and LoRA strategy for a model family."""
+    for config in FAMILY_CONFIGS:
+        if config.matches(model_name):
             return config
     print(
         f">>> WARNING: Unknown architecture for {model_name}; "
         "defaulting to llama-3 template."
     )
-    return MODEL_CONFIGS["llama-3"]
+    return FALLBACK_FAMILY
 
 
 def configure_chat_template(tokenizer, template=None):
@@ -143,3 +181,51 @@ def configure_chat_template(tokenizer, template=None):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = eos
     return tokenizer
+
+
+def load_jsonl(path):
+    """Load non-empty JSONL rows."""
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def validate_direct_conversations(samples):
+    """Validate direct conversation messages before formatting."""
+    for sample_index, sample in enumerate(samples):
+        messages = sample.get("messages")
+        if not isinstance(messages, list) or not messages:
+            raise ValueError(f"Sample {sample_index} has no conversation messages.")
+        for message_index, message in enumerate(messages):
+            role = message.get("role")
+            if role not in SUPPORTED_ROLES:
+                raise ValueError(
+                    f"Sample {sample_index}, message {message_index} has "
+                    f"unsupported role {role!r}."
+                )
+
+
+def load_dataset(data_dir, tokenizer):
+    """Load, validate, and render training and validation datasets."""
+    directory = Path(data_dir)
+    train_raw = load_jsonl(directory / "train.jsonl")
+    val_raw = load_jsonl(directory / "val.jsonl")
+    validate_direct_conversations(train_raw + val_raw)
+
+    def render(sample):
+        return {
+            "text": tokenizer.apply_chat_template(
+                sample["messages"],
+                tokenize=False,
+                add_generation_prompt=False,
+                enable_thinking=False,
+            )
+        }
+
+    print(f">>> Formatting {len(train_raw)} train + {len(val_raw)} val samples ...")
+    train_dataset = Dataset.from_list(train_raw).map(render, desc="Formatting train")
+    val_dataset = Dataset.from_list(val_raw).map(render, desc="Formatting val")
+    print(f">>> Done: {len(train_dataset)} train | {len(val_dataset)} val")
+    return train_dataset, val_dataset

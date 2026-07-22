@@ -18,7 +18,6 @@ def save_merged(
     model_name,
     max_shard_size,
 ):
-    """Save a merged 16-bit model with a PEFT fallback."""
     merged_path.mkdir(parents=True, exist_ok=True)
     try:
         print(">>> Merging LoRA into base model (16-bit) ...")
@@ -64,7 +63,6 @@ def save_merged(
 
 
 def save_gguf(model, tokenizer, gguf_path, gguf_method):
-    """Export GGUF files into a directory containing no intermediate weights."""
     gguf_path.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
         prefix=".gguf-export-",
@@ -96,7 +94,6 @@ def save_gguf(model, tokenizer, gguf_path, gguf_method):
 
 
 def push_to_hub(repo_id, adapter_path, merged_path, merge_ok, gguf_path, gguf_ok):
-    """Upload model artifacts and verify the separate GGUF repository."""
     api = HfApi()
     api.create_repo(repo_id=repo_id, exist_ok=True)
     artifact_path = merged_path if merge_ok else adapter_path
@@ -168,7 +165,6 @@ def _history_points(history, column):
 
 
 def _plot_loss_history(axis, train, validation):
-    """Plot training loss, validation loss, and their optional gap."""
     gap_axis = None
     if not train.empty:
         train["smoothed_loss"] = train["loss"].rolling(5, min_periods=1).mean()
@@ -228,7 +224,6 @@ def _plot_loss_history(axis, train, validation):
 
 
 def _plot_learning_rate_history(axis, learning_rate):
-    """Plot the learning-rate schedule."""
     if not learning_rate.empty:
         axis.plot(
             learning_rate["step"],
@@ -253,7 +248,6 @@ def _plot_learning_rate_history(axis, learning_rate):
 
 
 def save_training_report(trainer, output_dir):
-    """Write raw training history and diagnostic loss plots."""
     history = pd.DataFrame(trainer.state.log_history)
     if history.empty:
         return

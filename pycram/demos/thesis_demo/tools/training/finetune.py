@@ -1,8 +1,8 @@
 import gc
+import json
 import sys
 from pathlib import Path
 
-# Direct script execution must bootstrap the package path itself.
 _DEMOS_DIR = Path(__file__).resolve().parents[3]
 if str(_DEMOS_DIR) not in sys.path:
     sys.path.insert(0, str(_DEMOS_DIR))
@@ -11,49 +11,188 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-_NOTEBOOKS_DIR = _ROOT / "notebooks"
-if str(_NOTEBOOKS_DIR) not in sys.path:
-    sys.path.insert(0, str(_NOTEBOOKS_DIR))
+import torch
+import unsloth
+from transformers import DataCollatorForSeq2Seq
+from trl import SFTConfig, SFTTrainer
 
-import torch  # noqa: E402
-import unsloth  # noqa: E402
-from transformers import DataCollatorForSeq2Seq  # noqa: E402
-from trl import SFTConfig, SFTTrainer  # noqa: E402
-
-from thesis_demo.tools.training.artifacts import (  # noqa: E402
-    push_to_hub as _push_to_hub,
-    save_gguf as _save_gguf,
-    save_merged as _save_merged,
-    save_training_report as _save_training_report,
+from thesis_demo.planner.prompt import system_prompt, user_turn
+from thesis_demo.tools.training.artifacts import (
+    push_to_hub,
+    save_gguf,
+    save_merged,
+    save_training_report,
 )
-from thesis_demo.tools.training.config import (  # noqa: E402
-    configure_chat_template as _configure_chat_template,
-    detect_config as _detect_config,
+from thesis_demo.tools.training.config import (
+    DEFAULT_TARGET_MODULES,
+    PeftStrategy,
+    configure_chat_template,
+    detect_config,
+    load_dataset,
     parse_args,
+    validate_direct_conversations as _validate_direct_conversations,
 )
-from thesis_demo.tools.training.data import (  # noqa: E402
-    load_dataset as _load_dataset,
-    validate_direct_conversations as _validate_direct_conversations,  # noqa: F401
+from thesis_demo.validation.guard import verify
+
+
+class SanityCheckError(RuntimeError):
+    """Expected failure of a learned-behavior check."""
+
+
+SANITY_CASES = (
+    {
+        "name": "Fridge source",
+        "instruction": "bring the milk from the fridge to the table",
+        "context": {
+            "objects": ["milk"],
+            "object_locations": {"milk": ["fridge"]},
+            "surfaces": ["table"],
+            "containers": ["fridge"],
+            "openables": ["fridge"],
+            "furniture": [],
+            "rooms": ["kitchen"],
+            "types": {
+                "milk": "Milk",
+                "table": "Table",
+                "fridge": "Fridge",
+                "kitchen": "Kitchen",
+            },
+        },
+        "container_actions": {"OpenAction", "CloseAction"},
+        "source": "fridge",
+        "destination": "table",
+    },
+    {
+        "name": "Fridge source rephrase",
+        "instruction": "fetch the milk from the fridge and place it on the table",
+        "context": {
+            "objects": ["milk"],
+            "object_locations": {"milk": ["fridge"]},
+            "surfaces": ["table"],
+            "containers": ["fridge"],
+            "openables": ["fridge"],
+            "furniture": [],
+            "rooms": ["kitchen"],
+            "types": {
+                "milk": "Milk",
+                "table": "Table",
+                "fridge": "Fridge",
+                "kitchen": "Kitchen",
+            },
+        },
+        "container_actions": {"OpenAction", "CloseAction"},
+        "source": "fridge",
+        "destination": "table",
+    },
+    {
+        "name": "surface transport",
+        "instruction": "move the milk from the counter to the table",
+        "context": {
+            "objects": ["milk"],
+            "object_locations": {"milk": ["counter"]},
+            "surfaces": ["counter", "table"],
+            "containers": [],
+            "openables": [],
+            "furniture": [],
+            "rooms": ["kitchen"],
+            "types": {
+                "milk": "Milk",
+                "counter": "CounterTop",
+                "table": "Table",
+                "kitchen": "Kitchen",
+            },
+        },
+        "container_actions": set(),
+        "source": "counter",
+        "destination": "table",
+    },
 )
-from thesis_demo.tools.training.sanity import (  # noqa: E402
-    SanityCheckError,
-    generate as _generate_response,
-    run_sanity_check,
-)
+
+
+def generate(model, tokenizer, messages, max_new_tokens=2048):
+    tokens = tokenizer.apply_chat_template(
+        messages,
+        tokenize=True,
+        add_generation_prompt=True,
+        return_tensors="pt",
+        enable_thinking=False,
+    ).to(model.device)
+    attention_mask = tokens.new_ones(tokens.shape)
+    output = model.generate(
+        tokens,
+        attention_mask=attention_mask,
+        max_new_tokens=max_new_tokens,
+        do_sample=False,
+    )
+    return tokenizer.decode(
+        output[0][tokens.shape[1] :], skip_special_tokens=True
+    ).strip()
 
 
 def _generate(model, tokenizer, messages, max_new_tokens=2048):
-    """Generate one deterministic response for compatibility and testing."""
-    return _generate_response(model, tokenizer, messages, max_new_tokens)
+    return generate(model, tokenizer, messages, max_new_tokens)
+
+
+def _sanity_transport(plan, case):
+    transports = [
+        step for step in plan["plan"] if step.get("action") == "TransportAction"
+    ]
+    matches = (
+        transports[0].get("object"),
+        transports[0].get("source"),
+        transports[0].get("location"),
+    ) == ("milk", case["source"], case["destination"])
+    if len(transports) != 1 or not matches:
+        raise SanityCheckError(
+            f"{case['name']} failed: expected one matching TransportAction."
+        )
+
+
+def _sanity_container_actions(plan, case):
+    container_actions = {
+        step["action"]
+        for step in plan["plan"]
+        if step["action"] in {"OpenAction", "CloseAction"}
+    }
+    if container_actions != case["container_actions"]:
+        raise SanityCheckError(
+            f"{case['name']} failed: expected container actions "
+            f"{sorted(case['container_actions'])}, got "
+            f"{sorted(container_actions)}."
+        )
+
+
+def _check_sanity_case(model, tokenizer, generate_response, case):
+    messages = [
+        {"role": "system", "content": system_prompt()},
+        {"role": "user", "content": user_turn(case["instruction"], case["context"])},
+    ]
+    text = generate_response(model, tokenizer, messages)
+    try:
+        plan = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise SanityCheckError(
+            f"{case['name']} failed: response is not JSON: {text[:200]!r}."
+        ) from error
+    valid, reason = verify(plan, case["context"])
+    if not valid or not plan.get("plan"):
+        raise SanityCheckError(f"{case['name']} failed: invalid plan: {reason}.")
+    _sanity_transport(plan, case)
+    _sanity_container_actions(plan, case)
+
+
+def run_sanity_check(model, tokenizer, generate_response, fast_model):
+    fast_model.for_inference(model)
+    for case in SANITY_CASES:
+        _check_sanity_case(model, tokenizer, generate_response, case)
+    print(">>> Sanity check passed: all 3 planner behavior cases are valid.")
 
 
 def _run_sanity_check(model, tokenizer):
-    """Run the three learned-behavior checks."""
     return run_sanity_check(model, tokenizer, _generate, unsloth.FastModel)
 
 
 def _run_sanity_check_nonfatal(model, tokenizer):
-    """Run learned-behavior checks without blocking model exports."""
     try:
         _run_sanity_check(model, tokenizer)
     except SanityCheckError as error:
@@ -64,7 +203,6 @@ def _run_sanity_check_nonfatal(model, tokenizer):
 
 
 def _build_trainer(args, model, tokenizer, train_dataset, val_dataset, output_dir):
-    """Build the response-only SFT trainer with existing training defaults."""
     use_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
     estimated_steps = (
         args.epochs * len(train_dataset) / (args.batch_size * args.grad_accum)
@@ -126,7 +264,6 @@ def _build_trainer(args, model, tokenizer, train_dataset, val_dataset, output_di
 
 
 def _check_response_mask(trainer, tokenizer):
-    """Fail before training when response-only masking removed every label."""
     space_id = tokenizer(" ", add_special_tokens=False).input_ids[0]
     sample_labels = trainer.train_dataset[0]["labels"]
     supervised_tokens = sum(label != -100 for label in sample_labels)
@@ -140,42 +277,28 @@ def _check_response_mask(trainer, tokenizer):
     print(tokenizer.decode(visible_labels[:300]))
 
 
-def _load_model(args, template, model_config=None):
-    """Load the base model and attach its LoRA adapter.
-
-    :param args: Parsed training arguments.
-    :param template: Optional chat template override.
-    :param model_config: Model-family configuration.
-    :return: Model with LoRA adapter and configured tokenizer.
-    """
-    model_config = model_config or {}
-    load_in_4bit = model_config.get("load_in_4bit", True)
-    load_in_16bit = model_config.get("load_in_16bit", not load_in_4bit)
-    target_modules = model_config.get(
-        "target_modules",
-        [
-            "q_proj",
-            "k_proj",
-            "v_proj",
-            "o_proj",
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-        ],
-    )
-    print(f">>> Loading model: {args.model}")
-    model, tokenizer = unsloth.FastModel.from_pretrained(
-        model_name=args.model,
-        max_seq_length=args.max_seq_len,
-        load_in_4bit=load_in_4bit,
-        load_in_16bit=load_in_16bit,
-    )
-    model.generation_config.max_length = None
-    model = unsloth.FastModel.get_peft_model(
+def _apply_peft(model, args, peft_strategy):
+    if peft_strategy is PeftStrategy.MULTIMODAL_LAYERS:
+        return unsloth.FastModel.get_peft_model(
+            model,
+            r=args.lora_r,
+            lora_alpha=args.lora_alpha,
+            finetune_vision_layers=False,
+            finetune_language_layers=True,
+            finetune_attention_modules=True,
+            finetune_mlp_modules=True,
+            lora_dropout=args.lora_dropout,
+            bias="none",
+            random_state=args.seed,
+            use_gradient_checkpointing="unsloth",
+            use_rslora=False,
+            loftq_config=None,
+        )
+    return unsloth.FastModel.get_peft_model(
         model,
         r=args.lora_r,
         lora_alpha=args.lora_alpha,
-        target_modules=target_modules,
+        target_modules=list(DEFAULT_TARGET_MODULES),
         lora_dropout=args.lora_dropout,
         bias="none",
         random_state=args.seed,
@@ -183,7 +306,21 @@ def _load_model(args, template, model_config=None):
         use_rslora=False,
         loftq_config=None,
     )
-    tokenizer = _configure_chat_template(tokenizer, template)
+
+
+def _load_model(args, template, config):
+    """Load the base model and attach its LoRA adapter."""
+    load_in_4bit = config.load_in_4bit
+    print(f">>> Loading model: {args.model}")
+    model, tokenizer = unsloth.FastModel.from_pretrained(
+        model_name=args.model,
+        max_seq_length=args.max_seq_len,
+        load_in_4bit=load_in_4bit,
+        load_in_16bit=not load_in_4bit,
+    )
+    model.generation_config.max_length = None
+    model = _apply_peft(model, args, config.peft_strategy)
+    tokenizer = configure_chat_template(tokenizer, template)
     model.print_trainable_parameters()
     return model, tokenizer
 
@@ -192,14 +329,13 @@ def main():
     """Run fine-tuning and requested model exports."""
     args = parse_args()
 
-    config = dict(_detect_config(args.model))
-    if args.template:
-        config["template"] = args.template
-    args.instruction_part = config["instruction_part"]
-    args.response_part = config["response_part"]
+    config = detect_config(args.model)
+    template = args.template or config.template
+    args.instruction_part = config.instruction_part
+    args.response_part = config.response_part
 
-    model, tokenizer = _load_model(args, config["template"], config)
-    train_dataset, val_dataset = _load_dataset(args.data_dir, tokenizer)
+    model, tokenizer = _load_model(args, template, config)
+    train_dataset, val_dataset = load_dataset(args.data_dir, tokenizer)
     print(">>> Sample formatted text:")
     print(train_dataset[0]["text"])
 
@@ -222,7 +358,7 @@ def main():
     result = trainer.train()
     runtime = result.metrics.get("train_runtime", 0)
     print(f">>> Training finished in {runtime:.0f}s ({runtime / 60:.1f} min)")
-    _save_training_report(trainer, output_dir)
+    save_training_report(trainer, output_dir)
 
     adapter_path = output_dir / "adapter"
     model.save_pretrained(str(adapter_path))
@@ -233,7 +369,7 @@ def main():
     _run_sanity_check_nonfatal(model, tokenizer)
 
     merged_path = output_dir / "merged"
-    merge_ok = args.merge and _save_merged(
+    merge_ok = args.merge and save_merged(
         model,
         tokenizer,
         adapter_path,
@@ -242,7 +378,7 @@ def main():
         args.max_shard_size,
     )
     gguf_path = output_dir / "gguf"
-    gguf_ok = args.gguf and _save_gguf(
+    gguf_ok = args.gguf and save_gguf(
         model,
         tokenizer,
         gguf_path,
@@ -257,7 +393,7 @@ def main():
             "GGUF export was requested but failed. Hub upload was not started."
         )
     if args.push_to_hub:
-        _push_to_hub(
+        push_to_hub(
             args.push_to_hub,
             adapter_path,
             merged_path,

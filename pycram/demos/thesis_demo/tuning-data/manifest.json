@@ -1,0 +1,36 @@
+{
+  "counts": {
+    "families": {
+      "clarify_destination": 50,
+      "clarify_missing_object": 50,
+      "clarify_object": 50,
+      "clarify_open_container": 50,
+      "clarify_source": 50,
+      "close": 50,
+      "multi_transport_container_swap": 50,
+      "multi_transport_distinct_surfaces": 50,
+      "multi_transport_mixed_destination": 50,
+      "multi_transport_same_destination": 50,
+      "navigate": 50,
+      "open": 50,
+      "pickup_container": 50,
+      "pickup_place_container": 50,
+      "pickup_place_directional": 50,
+      "pickup_place_surface": 50,
+      "pickup_surface": 50,
+      "transport_behind": 50,
+      "transport_container_container": 50,
+      "transport_container_surface": 50,
+      "transport_in_front_of": 50,
+      "transport_left_of": 50,
+      "transport_right_of": 50,
+      "transport_surface_container": 50,
+      "transport_surface_surface": 50
+    },
+    "train": 1150,
+    "val": 100
+  },
+  "per_family": 25,
+  "schema_version": 2,
+  "seed": 0
+}

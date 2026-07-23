@@ -5,7 +5,7 @@ import csv
 import json
 import os
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import llama_cpp
@@ -41,18 +41,54 @@ class ModelSpecification:
 @dataclass
 class ResultWriter:
     output_directory: Path
+    results: list = field(default_factory=list)
 
     @property
     def results_path(self):
         return self.output_directory / "results.jsonl"
 
     @property
+    def case_results_path(self):
+        return self.output_directory / "results.csv"
+
+    @property
     def summary_path(self):
         return self.output_directory / "summary.csv"
 
     def append(self, result):
+        self.results.append(result)
         with self.results_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(result.to_record(), sort_keys=True) + "\n")
+        self.write_case_results(self.results)
+        self.write_summary(self.results)
+
+    def write_case_results(self, results):
+        rows = [
+            {
+                "id": result.case.id,
+                "model_variant": (
+                    result.model_variant.value
+                    if result.model_variant is not None
+                    else None
+                ),
+                "evaluation_mode": result.evaluation_mode.value,
+                "expected_outcome": result.case.expected_outcome,
+                "planner_outcome": result.planner_outcome,
+                "planning_success": result.planning_success,
+                "grounding_success": result.grounding_success,
+                "execution_success": result.execution_success,
+                "task_success": result.task_success,
+                "execution_status": result.execution_status,
+                "failure_stage": result.failure_stage,
+                "error": result.error,
+                "planning_latency_s": result.planning_latency_s,
+                "execution_latency_s": result.execution_latency_s,
+                "total_latency_s": result.total_latency_s,
+            }
+            for result in results
+        ]
+        self._write_csv(self.case_results_path, rows)
+        return self.case_results_path
 
     def write_summary(self, results):
         grouped = {
@@ -87,17 +123,37 @@ class ResultWriter:
                 }
             )
 
-        with self.summary_path.open("w", newline="", encoding="utf-8") as handle:
+        self._write_csv(self.summary_path, rows)
+        return self.summary_path
+
+    @staticmethod
+    def _write_csv(path, rows):
+        temporary_path = path.with_suffix(f"{path.suffix}.tmp")
+        with temporary_path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=tuple(rows[0]))
             writer.writeheader()
             writer.writerows(rows)
-        return self.summary_path
+        temporary_path.replace(path)
 
 
 def _difference(base_percent, finetuned_percent):
     if base_percent is None or finetuned_percent is None:
         return None
     return round(finetuned_percent - base_percent, 1)
+
+
+def _positive_seconds(value):
+    seconds = float(value)
+    if seconds <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return seconds
+
+
+def _nonnegative_seconds(value):
+    seconds = float(value)
+    if seconds < 0:
+        raise argparse.ArgumentTypeError("must not be negative")
+    return seconds
 
 
 def create_parser():
@@ -128,6 +184,16 @@ def create_parser():
         help="Run only this case ID. May be repeated.",
     )
     argument_parser.add_argument("--visualization-delay", type=float, default=0.0)
+    argument_parser.add_argument(
+        "--world-settle-delay",
+        type=_nonnegative_seconds,
+        default=2.0,
+    )
+    argument_parser.add_argument(
+        "--case-timeout",
+        type=_positive_seconds,
+        default=EvaluationConfiguration().case_timeout_s,
+    )
     argument_parser.add_argument("--n-gpu-layers", type=int)
     argument_parser.add_argument("--n-ctx", type=int, default=planner.N_CTX)
     argument_parser.add_argument("--seed", type=int, default=0)
@@ -263,10 +329,12 @@ def main():
     configuration = EvaluationConfiguration(
         mode=arguments.mode,
         visualization_delay_s=arguments.visualization_delay,
+        world_settle_delay_s=arguments.world_settle_delay,
+        case_timeout_s=arguments.case_timeout,
     )
     session = DemoSession(visualize=os.environ.get("NLP_VISUALIZE", "1") != "0")
     if arguments.validate_world:
-        validate_demo_world(cases, session)
+        validate_demo_world(cases, session, configuration.world_settle_delay_s)
         print(f"Validated {len(cases)} cases against the live CRAM Kitchen.")
         return 0
 
@@ -285,6 +353,8 @@ def main():
         {
             "case_ids": [case.id for case in cases],
             "evaluation_mode": configuration.mode.value,
+            "case_timeout_s": configuration.case_timeout_s,
+            "world_settle_delay_s": configuration.world_settle_delay_s,
             "inference": asdict(inference),
             "n_ctx": arguments.n_ctx,
             "llama_cpp_version": llama_cpp.__version__,
@@ -321,7 +391,7 @@ def main():
         )
         raise
 
-    summary_path = writer.write_summary(results)
+    summary_path = writer.summary_path
     summaries = {
         variant.value: asdict(
             LiveSummary.from_results(
@@ -331,7 +401,10 @@ def main():
         for variant in ModelVariant
     }
     log_event(logger, "run_end", {"summaries": summaries})
-    print(f"Wrote {writer.results_path}, {summary_path}, and evaluation.log")
+    print(
+        f"Wrote {writer.results_path}, {writer.case_results_path}, "
+        f"{summary_path}, and evaluation.log"
+    )
     return 0
 
 

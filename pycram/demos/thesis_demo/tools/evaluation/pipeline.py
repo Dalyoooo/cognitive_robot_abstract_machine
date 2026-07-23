@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import signal
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 
@@ -17,6 +19,41 @@ from thesis_demo.tools.evaluation.scoring import (
     validate_kitchen_inventory,
 )
 from thesis_demo.validation.schema import DIRECTIONAL_RELATIONS
+
+
+class CaseTimeoutError(TimeoutError):
+    pass
+
+
+@dataclass
+class CaseDeadline:
+    seconds: float | None
+    previous_handler: object = field(init=False, default=None)
+    active: bool = field(init=False, default=False)
+
+    def __enter__(self):
+        if self.seconds is None:
+            return self
+        if threading.current_thread() is not threading.main_thread():
+            raise RuntimeError("case deadlines require the main thread")
+
+        # pyCRAM has no case-level deadline. SIGALRM interrupts its synchronous plan.
+        self.previous_handler = signal.signal(signal.SIGALRM, self._expire)
+        signal.setitimer(signal.ITIMER_REAL, self.seconds)
+        self.active = True
+        return self
+
+    def __exit__(self, _error_type, _error, _traceback):
+        if not self.active:
+            return
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, self.previous_handler)
+        self.active = False
+
+    def _expire(self, _signal_number, _frame):
+        raise CaseTimeoutError(
+            f"case exceeded its {self.seconds:g} second time limit"
+        )
 
 
 def create_log(path):
@@ -481,7 +518,16 @@ def evaluate_case(
         metrics=_empty_metrics(),
     )
     try:
-        _run_case(result, case, planner, session, configuration, logger, inference)
+        with CaseDeadline(configuration.case_timeout_s):
+            _run_case(
+                result,
+                case,
+                planner,
+                session,
+                configuration,
+                logger,
+                inference,
+            )
     finally:
         _stop_world_logged(case, session, logger)
     result.total_latency_s = time.perf_counter() - started
@@ -505,8 +551,16 @@ def world_context(session):
     return session.context()
 
 
-def _setup_world(case, session, logger):
+def _wait_for_world(delay_s):
+    if delay_s <= 0:
+        return
+    # pyCRAM provides no readiness signal after constructing this demo world.
+    time.sleep(delay_s)
+
+
+def _setup_world(case, session, configuration, logger):
     session.setup_world(case.robot, case.environment)
+    _wait_for_world(configuration.world_settle_delay_s)
     context = world_context(session)
     if case.environment == "kitchen":
         validate_entities(case, context, "live Kitchen")
@@ -673,7 +727,7 @@ def _run_case(result, case, planner, session, configuration, logger, inference):
     metrics = result.metrics
     stage = _CaseStage()
     try:
-        context = _setup_world(case, session, logger)
+        context = _setup_world(case, session, configuration, logger)
 
         stage.enter("planning")
         planning = _plan_turns(result, case, planner, context, logger, inference)
@@ -709,6 +763,27 @@ def _run_case(result, case, planner, session, configuration, logger, inference):
         if failed_without_a_stage:
             result.failure_stage = "goal_verification"
             result.error = result.error or "required goals could not be confirmed"
+    except CaseTimeoutError as error:
+        elapsed = stage.elapsed()
+        result.error = str(error)
+        result.failure_stage = stage.name
+        if stage.name == "execution":
+            result.execution_latency_s += elapsed
+            result.execution_status = "timeout"
+            result.execution_success = False
+        elif stage.name == "planning":
+            result.planning_latency_s += elapsed
+            result.planning_success = False
+        if logger is not None:
+            log_exception(
+                logger,
+                "case_timeout",
+                {
+                    "case_id": case.id,
+                    "phase": stage.name,
+                    "error": str(error),
+                },
+            )
     except Exception as exc:
         elapsed = stage.elapsed()
         result.error = f"{type(exc).__name__}: {exc}"
@@ -734,9 +809,10 @@ def _run_case(result, case, planner, session, configuration, logger, inference):
             )
 
 
-def validate_demo_world(cases, session):
+def validate_demo_world(cases, session, world_settle_delay_s=0.0):
     try:
         session.setup_world("hsrb", "kitchen")
+        _wait_for_world(world_settle_delay_s)
         context = world_context(session)
         validate_kitchen_inventory(context, cases, "live Kitchen")
         for case in cases:

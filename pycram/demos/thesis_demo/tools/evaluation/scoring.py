@@ -141,6 +141,14 @@ class LiveCase:
 class EvaluationConfiguration:
     mode: EvaluationMode = EvaluationMode.END_TO_END
     visualization_delay_s: float = 0.0
+    world_settle_delay_s: float = 0.0
+    case_timeout_s: float | None = 300.0
+
+    def __post_init__(self):
+        if self.world_settle_delay_s < 0:
+            raise ValueError("world_settle_delay_s must not be negative")
+        if self.case_timeout_s is not None and self.case_timeout_s <= 0:
+            raise ValueError("case_timeout_s must be positive or None")
 
 
 @dataclass

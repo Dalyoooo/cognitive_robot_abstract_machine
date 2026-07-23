@@ -161,6 +161,7 @@ class LiveResult:
     grounding_success: bool | None = None
     execution_success: bool | None = None
     execution_status: str = "not_attempted"
+    timed_out: bool = False
     task_success: bool | None = None
     failure_stage: str | None = None
     error: str | None = None
@@ -190,6 +191,7 @@ class LiveResult:
             "grounding_success": self.grounding_success,
             "execution_success": self.execution_success,
             "execution_status": self.execution_status,
+            "timed_out": self.timed_out,
             "task_success": self.task_success,
             "failure_stage": self.failure_stage,
             "error": self.error,

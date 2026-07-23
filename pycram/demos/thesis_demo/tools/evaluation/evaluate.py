@@ -38,6 +38,10 @@ class ModelSpecification:
     gguf_file: str | None
 
 
+class EvaluationStoppedAfterTimeout(RuntimeError):
+    pass
+
+
 @dataclass
 class ResultWriter:
     output_directory: Path
@@ -79,6 +83,7 @@ class ResultWriter:
                 "execution_success": result.execution_success,
                 "task_success": result.task_success,
                 "execution_status": result.execution_status,
+                "timed_out": result.timed_out,
                 "failure_stage": result.failure_stage,
                 "error": result.error,
                 "planning_latency_s": result.planning_latency_s,
@@ -193,6 +198,10 @@ def create_parser():
         "--case-timeout",
         type=_positive_seconds,
         default=EvaluationConfiguration().case_timeout_s,
+        help=(
+            "Maximum seconds without completed progress. Each completed plan "
+            "step resets the timer."
+        ),
     )
     argument_parser.add_argument("--n-gpu-layers", type=int)
     argument_parser.add_argument("--n-ctx", type=int, default=planner.N_CTX)
@@ -293,6 +302,12 @@ def _run_cases(cases, model, session, configuration, inference, logger, writer):
         writer.append(result)
         _print_result(result)
         log_event(logger, "case_end", result.to_record())
+        if result.timed_out:
+            raise EvaluationStoppedAfterTimeout(
+                f"case {case.id} timed out. The native pyCRAM state may be "
+                "inconsistent. Preserve these results and restart the evaluation "
+                "in a fresh process."
+            )
         if configuration.visualization_delay_s > 0 and case_index < len(cases) - 1:
             time.sleep(configuration.visualization_delay_s)
     return results
@@ -379,6 +394,17 @@ def main():
                     cases, model, session, configuration, inference, logger, writer
                 )
             )
+    except EvaluationStoppedAfterTimeout as error:
+        log_event(
+            logger,
+            "run_stopped_after_timeout",
+            {
+                "phase": run_phase,
+                "error": str(error),
+            },
+        )
+        print(f"[STOP] {error}", flush=True)
+        return 2
     except Exception as error:
         log_exception(
             logger,

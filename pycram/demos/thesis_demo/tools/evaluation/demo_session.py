@@ -29,10 +29,18 @@ class DemoSession:
     def context(self):
         return classify_world(self.world, self.robot)
 
-    def execute_plan(self, plan_dict):
+    def execute_plan(self, plan_dict, step_callback=None):
         steps = plan_dict.get("plan", [])
         try:
-            observations = run_plan(self.world, self.robot, self.demo_context, steps)
+            observations = run_plan(
+                self.world,
+                self.robot,
+                self.demo_context,
+                steps,
+                step_callback=step_callback,
+            )
+        except TimeoutError:
+            raise
         except GroundingError as error:
             self.result = {
                 "status": "error",

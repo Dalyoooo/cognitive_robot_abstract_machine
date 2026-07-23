@@ -37,10 +37,10 @@ class CaseDeadline:
         if threading.current_thread() is not threading.main_thread():
             raise RuntimeError("case deadlines require the main thread")
 
-        # pyCRAM has no case-level deadline. SIGALRM interrupts its synchronous plan.
+        # pyCRAM has no timeout API for its synchronous execution calls.
         self.previous_handler = signal.signal(signal.SIGALRM, self._expire)
-        signal.setitimer(signal.ITIMER_REAL, self.seconds)
         self.active = True
+        self.reset()
         return self
 
     def __exit__(self, _error_type, _error, _traceback):
@@ -50,9 +50,13 @@ class CaseDeadline:
         signal.signal(signal.SIGALRM, self.previous_handler)
         self.active = False
 
+    def reset(self):
+        if self.active:
+            signal.setitimer(signal.ITIMER_REAL, self.seconds)
+
     def _expire(self, _signal_number, _frame):
         raise CaseTimeoutError(
-            f"case exceeded its {self.seconds:g} second time limit"
+            f"case made no progress for {self.seconds:g} seconds"
         )
 
 
@@ -455,7 +459,7 @@ def _target_matches(question, targets):
     return False
 
 
-def _execute_plan(case, session, payload, logger):
+def _execute_plan(case, session, payload, logger, deadline):
     _trace(
         logger,
         "execution_start",
@@ -464,7 +468,20 @@ def _execute_plan(case, session, payload, logger):
         step_count=len(payload.get("plan", [])),
     )
     started = time.perf_counter()
-    session.execute_plan(payload)
+
+    def step_completed(step_index, step):
+        deadline.reset()
+        _trace(
+            logger,
+            "execution_progress",
+            case,
+            "execution",
+            step_index=step_index,
+            action=step.get("action"),
+        )
+
+    deadline.reset()
+    session.execute_plan(payload, step_callback=step_completed)
     result = session.execution_result()
     if not isinstance(result, dict) or "status" not in result:
         raise RuntimeError("synchronous execution returned no status")
@@ -518,7 +535,7 @@ def evaluate_case(
         metrics=_empty_metrics(),
     )
     try:
-        with CaseDeadline(configuration.case_timeout_s):
+        with CaseDeadline(configuration.case_timeout_s) as deadline:
             _run_case(
                 result,
                 case,
@@ -527,6 +544,7 @@ def evaluate_case(
                 configuration,
                 logger,
                 inference,
+                deadline,
             )
     finally:
         _stop_world_logged(case, session, logger)
@@ -687,7 +705,16 @@ def _plan_turns(result, case, planner, context, logger, inference):
     return _PlanningResult(payload, final_outcome, None)
 
 
-def _execute(result, case, session, planning, configuration, stage, logger):
+def _execute(
+    result,
+    case,
+    session,
+    planning,
+    configuration,
+    stage,
+    logger,
+    deadline,
+):
     if planning.final_outcome == "clarification":
         result.execution_status = "not_required"
         return None
@@ -702,7 +729,13 @@ def _execute(result, case, session, planning, configuration, stage, logger):
     stage.enter("execution")
     if configuration.visualization_delay_s > 0:
         time.sleep(configuration.visualization_delay_s)
-    executor_result, latency = _execute_plan(case, session, planning.payload, logger)
+    executor_result, latency = _execute_plan(
+        case,
+        session,
+        planning.payload,
+        logger,
+        deadline,
+    )
     result.execution_latency_s += latency
     status = executor_result.get("status", "error")
     executor_phase = executor_result.get("phase")
@@ -723,13 +756,23 @@ def _execute(result, case, session, planning, configuration, stage, logger):
     return executor_result
 
 
-def _run_case(result, case, planner, session, configuration, logger, inference):
+def _run_case(
+    result,
+    case,
+    planner,
+    session,
+    configuration,
+    logger,
+    inference,
+    deadline,
+):
     metrics = result.metrics
     stage = _CaseStage()
     try:
         context = _setup_world(case, session, configuration, logger)
 
         stage.enter("planning")
+        deadline.reset()
         planning = _plan_turns(result, case, planner, context, logger, inference)
         if planning.error is not None:
             return
@@ -740,7 +783,14 @@ def _run_case(result, case, planner, session, configuration, logger, inference):
             return
 
         executor_result = _execute(
-            result, case, session, planning, configuration, stage, logger
+            result,
+            case,
+            session,
+            planning,
+            configuration,
+            stage,
+            logger,
+            deadline,
         )
         if result.failure_stage is not None:
             return
@@ -766,6 +816,7 @@ def _run_case(result, case, planner, session, configuration, logger, inference):
     except CaseTimeoutError as error:
         elapsed = stage.elapsed()
         result.error = str(error)
+        result.timed_out = True
         result.failure_stage = stage.name
         if stage.name == "execution":
             result.execution_latency_s += elapsed

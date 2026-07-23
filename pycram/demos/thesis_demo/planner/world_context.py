@@ -81,7 +81,7 @@ class _ClassifiedEntities:
         for room in rooms:
             entities.types[planner_names[str(room.name)]] = type(room).__name__
 
-        hidden_roots = _component_roots(grouped_annotations)
+        hidden_roots = _hidden_task_roots(grouped_annotations)
         for root, annotations in grouped_annotations.items():
             if root in hidden_roots:
                 continue
@@ -205,6 +205,25 @@ def annotation_type_name(annotations):
     return type(primary_annotation(annotations)).__name__
 
 
+def _structural_body_name(name):
+    # semDT exposes the URDF body name but no planner label for repeated components.
+    if "/" not in name:
+        return None
+    local_name = name.rsplit("/", 1)[-1].removesuffix("_main")
+    return _snake_token(local_name) if local_name else None
+
+
+def _descriptive_duplicate_names(names, reserved_names):
+    descriptive_names = [_structural_body_name(name) for name in names]
+    if not all(descriptive_names):
+        return None
+    if len(descriptive_names) != len(set(descriptive_names)):
+        return None
+    if set(descriptive_names).intersection(reserved_names):
+        return None
+    return descriptive_names
+
+
 def planner_names_for(world):
     # semDT names preserve model prefixes. Planner names need stable, short tokens.
     rooms = world.get_semantic_annotations_by_type(Room)
@@ -224,11 +243,18 @@ def planner_names_for(world):
         names_by_token.setdefault(token, []).append(str(room.name))
 
     planner_names = {}
+    reserved_names = set(names_by_token)
     for token, names in names_by_token.items():
         if len(names) == 1:
             planner_names[names[0]] = token
             continue
-        for index, name in enumerate(sorted(names), start=1):
+        sorted_names = sorted(names)
+        descriptive_names = _descriptive_duplicate_names(sorted_names, reserved_names)
+        if descriptive_names is not None:
+            planner_names.update(zip(sorted_names, descriptive_names, strict=True))
+            reserved_names.update(descriptive_names)
+            continue
+        for index, name in enumerate(sorted_names, start=1):
             planner_names[name] = f"{token}_{index}"
     return planner_names
 
@@ -284,19 +310,28 @@ def _entity_capabilities(annotations):
     )
 
 
-def _component_roots(annotations_by_root):
-    components = set()
-    for annotations in annotations_by_root.values():
+def _hidden_task_roots(annotations_by_root):
+    hidden_annotations = set()
+    hidden_roots = set()
+    for root, annotations in annotations_by_root.items():
         for annotation in annotations:
             if isinstance(annotation, HasDoors):
-                components.update(annotation.doors)
-            if isinstance(annotation, HasDrawers):
-                components.update(annotation.drawers)
-    return {
+                hidden_annotations.update(annotation.doors)
+            if (
+                isinstance(annotation, HasDrawers)
+                and annotation.drawers
+                and type(annotation) not in FURNITURE_ANNOTATION_TYPES
+            ):
+                # semDT can label a cabinet shell as Wardrobe. Its concrete
+                # Drawer children are the task-relevant containers.
+                hidden_roots.add(root)
+
+    hidden_roots.update(
         root
         for root, annotations in annotations_by_root.items()
-        if any(annotation in components for annotation in annotations)
-    }
+        if any(annotation in hidden_annotations for annotation in annotations)
+    )
+    return hidden_roots
 
 
 @dataclass

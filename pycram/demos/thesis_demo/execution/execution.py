@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-import pycram.alternative_motion_mappings.tiago_motion_mapping
+import pycram.alternative_motion_mappings.tiago_motion_mapping as _tiago_motion_mapping  # noqa: F401
 from pycram.datastructures.enums import Arms
 from pycram.locations.locations import AccessingLocation, CostmapLocation
 from pycram.motion_executor import simulated_robot
@@ -21,7 +21,7 @@ from thesis_demo.execution.observations import (
 )
 from thesis_demo.validation.schema import DIRECTIONAL_RELATIONS, VALID_PYCRAM_ACTIONS
 
-ACTIONS_WITH_NAVIGATION = frozenset(
+ACTIONS_WITH_INTERNAL_NAVIGATION = frozenset(
     {
         "OpenAction",
         "CloseAction",
@@ -36,6 +36,13 @@ class _MapPoint:
     x: float
     y: float
     z: float
+
+
+@dataclass(frozen=True)
+class _PendingNavigation:
+    step_index: int
+    step: dict
+    combined_with: str
 
 
 def _map_point(pose):
@@ -290,10 +297,8 @@ class ActionMapper:
                     context=self.context,
                     grasp_description=grasp_description,
                 ).resolve()
-                # A reachable costmap yields a GraspPose that carries its arm.
                 return base_pose, base_pose.arm
             except StopIteration as error:
-                # pyCRAM exhausts one arm's costmap before another arm is tried.
                 last_error = error
         raise GroundingError(
             f"No reachable arm for target pose {target_pose!r}: {last_error!r}"
@@ -328,9 +333,7 @@ def _map_step(mapper, step, step_index):
     return [mapped_action]
 
 
-def _navigation_is_redundant(steps, step_index):
-    # These pyCRAM actions already use a grounded base pose, so a directly
-    # preceding NavigateAction would execute the same navigation twice.
+def _navigation_is_combined_with_next_action(steps, step_index):
     step = steps[step_index]
     if step.get("action") != "NavigateAction":
         return False
@@ -340,33 +343,24 @@ def _navigation_is_redundant(steps, step_index):
         return False
 
     next_step = steps[next_step_index]
-    return next_step.get("action") in ACTIONS_WITH_NAVIGATION
+    return next_step.get("action") in ACTIONS_WITH_INTERNAL_NAVIGATION
 
 
 def _complete_observations(
     mapper,
     robot,
     steps,
-    navigation_checks=None,
+    navigation_observations=None,
     directional_checks=None,
 ):
-    navigation_checks = navigation_checks or []
+    navigation_observations = navigation_observations or []
     directional_checks = directional_checks or []
     observations = {
-        "navigation": [],
+        "navigation": list(navigation_observations),
         "container_states": {},
         "held_objects": [],
-        "arms_parked": None,
         "directional_relations": [],
     }
-
-    for check in navigation_checks:
-        observations["navigation"].append(
-            {
-                "location": check["location"],
-                "success": _navigation_succeeded(check["action"]),
-            }
-        )
 
     for check in directional_checks:
         observations["directional_relations"].append(
@@ -408,14 +402,18 @@ def run_plan(world, robot, context, steps, step_callback=None):
     log_world_stats(world, "grounding")
     mapper = ActionMapper(world, robot, context)
     plan_root = sequential([], context=context)
-    navigation_checks = []
+    navigation_observations = []
     directional_checks = []
-    pending_navigation_location = None
+    pending_navigation = None
 
     with simulated_robot:
         for step_index, step in enumerate(steps):
-            if _navigation_is_redundant(steps, step_index):
-                pending_navigation_location = step.get("location")
+            if _navigation_is_combined_with_next_action(steps, step_index):
+                pending_navigation = _PendingNavigation(
+                    step_index=step_index,
+                    step=step,
+                    combined_with=steps[step_index + 1]["action"],
+                )
                 continue
 
             viewpoint = None
@@ -424,27 +422,39 @@ def run_plan(world, robot, context, steps, step_callback=None):
 
             actions = _map_step(mapper, step, step_index)
             try:
-                for action in actions:
+                for action_index, action in enumerate(actions):
                     action_node = make_node(action)
                     plan_root.add_child(action_node)
                     action_node.perform()
+
+                    if pending_navigation is not None and action_index == 0:
+                        # A later manipulation can move the base. pyCRAM's
+                        # navigation postcondition must therefore be saved now.
+                        navigation_observations.append(
+                            {
+                                "location": pending_navigation.step.get("location"),
+                                "success": _navigation_succeeded(action),
+                                "combined_with": pending_navigation.combined_with,
+                            }
+                        )
+                        if step_callback is not None:
+                            step_callback(
+                                pending_navigation.step_index,
+                                pending_navigation.step,
+                            )
+                        pending_navigation = None
+                    elif (
+                        step.get("action") == "NavigateAction"
+                        and action_index == len(actions) - 1
+                    ):
+                        navigation_observations.append(
+                            {
+                                "location": step.get("location"),
+                                "success": _navigation_succeeded(action),
+                            }
+                        )
                 mapper.register_world_state(step)
 
-                if pending_navigation_location is not None:
-                    navigation_checks.append(
-                        {
-                            "location": pending_navigation_location,
-                            "action": actions[0],
-                        }
-                    )
-                    pending_navigation_location = None
-                elif step.get("action") == "NavigateAction":
-                    navigation_checks.append(
-                        {
-                            "location": step.get("location"),
-                            "action": actions[-1],
-                        }
-                    )
                 if viewpoint is not None:
                     directional_checks.append(
                         {
@@ -464,7 +474,7 @@ def run_plan(world, robot, context, steps, step_callback=None):
         mapper,
         robot,
         steps,
-        navigation_checks,
+        navigation_observations,
         directional_checks,
     )
     return observations

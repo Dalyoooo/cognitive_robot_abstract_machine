@@ -1,272 +1,338 @@
+from __future__ import annotations
+
 import argparse
 import csv
 import json
-import logging
 import os
-import tempfile
 import time
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import llama_cpp
 
-ROOT = Path(
-    os.environ.get(
-        "NLP_DATASET_ROOT",
-        Path(__file__).resolve().parents[5].parent / "NLP-binder",
-    )
-)
-
-from ...planner import llm as planner
-
-from .demo_session import DemoSession
-from .pipeline import (
+from thesis_demo.planner import llm as planner
+from thesis_demo.tools.evaluation.demo_session import DemoSession
+from thesis_demo.tools.evaluation.pipeline import (
     create_log,
     evaluate_case,
     log_event,
     log_exception,
     validate_demo_world,
 )
-from .report import generate_report
-from .scoring import (
+from thesis_demo.tools.evaluation.scoring import (
     CASES_FILE,
-    EvaluationConfig,
+    MAIN_METRICS,
+    EvaluationConfiguration,
+    EvaluationMode,
     LiveSummary,
+    MetricAggregate,
+    ModelVariant,
     load_cases,
 )
 
 
-def write_outputs(results, output_dir):
-    output_dir.mkdir(parents=True, exist_ok=True)
-    paths = (
-        output_dir / "results.json",
-        output_dir / "results.csv",
-    )
-    report = {
-        "results": [asdict(result) for result in results],
-    }
-    paths[0].write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    rows = [result.to_row() for result in results]
-    columns = list(dict.fromkeys(column for row in rows for column in row))
-    with paths[1].open("w", newline="", encoding="utf-8") as handle:
-        if columns:
-            writer = csv.DictWriter(handle, fieldnames=columns)
+@dataclass(frozen=True)
+class ModelSpecification:
+    variant: ModelVariant
+    model: str
+    gguf_file: str | None
+
+
+@dataclass
+class ResultWriter:
+    output_directory: Path
+
+    @property
+    def results_path(self):
+        return self.output_directory / "results.jsonl"
+
+    @property
+    def summary_path(self):
+        return self.output_directory / "summary.csv"
+
+    def append(self, result):
+        with self.results_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(result.to_record(), sort_keys=True) + "\n")
+
+    def write_summary(self, results):
+        grouped = {
+            variant: [result for result in results if result.model_variant == variant]
+            for variant in ModelVariant
+        }
+        rows = []
+        for metric in MAIN_METRICS:
+            base = MetricAggregate.from_results(grouped[ModelVariant.BASE], metric)
+            finetuned = MetricAggregate.from_results(
+                grouped[ModelVariant.FINETUNED], metric
+            )
+            rows.append(
+                {
+                    "metric": metric,
+                    "base_successes": base.successes,
+                    "base_observed_cases": base.observed_cases,
+                    "base_total_cases": base.total_cases,
+                    "base_stage_percent": base.stage_percent,
+                    "base_benchmark_percent": base.benchmark_percent,
+                    "finetuned_successes": finetuned.successes,
+                    "finetuned_observed_cases": finetuned.observed_cases,
+                    "finetuned_total_cases": finetuned.total_cases,
+                    "finetuned_stage_percent": finetuned.stage_percent,
+                    "finetuned_benchmark_percent": finetuned.benchmark_percent,
+                    "stage_difference_percentage_points": _difference(
+                        base.stage_percent, finetuned.stage_percent
+                    ),
+                    "benchmark_difference_percentage_points": _difference(
+                        base.benchmark_percent, finetuned.benchmark_percent
+                    ),
+                }
+            )
+
+        with self.summary_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=tuple(rows[0]))
             writer.writeheader()
             writer.writerows(rows)
-    return paths
+        return self.summary_path
 
 
-def _parser():
-    parser = argparse.ArgumentParser(
-        description="Run the frozen Kitchen benchmark through planning and CRAM execution."
+def _difference(base_percent, finetuned_percent):
+    if base_percent is None or finetuned_percent is None:
+        return None
+    return round(finetuned_percent - base_percent, 1)
+
+
+def create_parser():
+    argument_parser = argparse.ArgumentParser(
+        description=(
+            "Compare a base and fine-tuned planner on the frozen Kitchen benchmark."
+        )
     )
-    parser.add_argument("--model")
-    parser.add_argument("--gguf-file")
-    parser.add_argument("--cases", type=Path, default=CASES_FILE)
-    parser.add_argument("--output-dir", type=Path, default=Path("eval_results/kitchen"))
-    parser.add_argument("--validate-world", action="store_true")
-    parser.add_argument("--world-timeout", type=float, default=60.0)
-    parser.add_argument("--execution-timeout", type=float, default=180.0)
-    parser.add_argument(
+    argument_parser.add_argument("--base-model")
+    argument_parser.add_argument("--base-gguf-file")
+    argument_parser.add_argument("--finetuned-model")
+    argument_parser.add_argument("--finetuned-gguf-file")
+    argument_parser.add_argument("--cases", type=Path, default=CASES_FILE)
+    argument_parser.add_argument(
+        "--output-dir", type=Path, default=Path("eval_results/kitchen")
+    )
+    argument_parser.add_argument("--validate-world", action="store_true")
+    argument_parser.add_argument(
+        "--mode",
+        type=EvaluationMode,
+        choices=tuple(EvaluationMode),
+        default=EvaluationMode.END_TO_END,
+    )
+    argument_parser.add_argument(
         "--case-id",
         action="append",
         default=[],
         help="Run only this case ID. May be repeated.",
     )
-    parser.add_argument(
-        "--limit", type=int, help="Run only the first N selected cases."
+    argument_parser.add_argument("--visualization-delay", type=float, default=0.0)
+    argument_parser.add_argument("--n-gpu-layers", type=int)
+    argument_parser.add_argument("--n-ctx", type=int, default=planner.N_CTX)
+    argument_parser.add_argument("--seed", type=int, default=0)
+    argument_parser.add_argument("--temperature", type=float, default=0.0)
+    argument_parser.add_argument(
+        "--max-tokens", type=int, default=planner.MAX_NEW_TOKENS
     )
-    parser.add_argument(
-        "--visualization-delay",
-        type=float,
-        default=0.0,
-        help="Pause before execution and between cases for RViz viewing.",
+    return argument_parser
+
+
+def select_cases(argument_parser, arguments):
+    cases = load_cases(arguments.cases)
+    if not arguments.case_id:
+        return cases
+
+    selected_ids = set(arguments.case_id)
+    selected_cases = [case for case in cases if case.id in selected_ids]
+    missing_ids = selected_ids - {case.id for case in selected_cases}
+    if missing_ids:
+        argument_parser.error(
+            f"unknown --case-id values: {', '.join(sorted(missing_ids))}"
+        )
+    return selected_cases
+
+
+def model_specifications(argument_parser, arguments):
+    missing = [
+        option
+        for option, value in (
+            ("--base-model", arguments.base_model),
+            ("--finetuned-model", arguments.finetuned_model),
+        )
+        if not value
+    ]
+    if missing:
+        argument_parser.error(f"required arguments: {', '.join(missing)}")
+    models = (
+        ModelSpecification(
+            ModelVariant.BASE,
+            arguments.base_model,
+            _gguf_file(arguments.base_model, arguments.base_gguf_file),
+        ),
+        ModelSpecification(
+            ModelVariant.FINETUNED,
+            arguments.finetuned_model,
+            _gguf_file(arguments.finetuned_model, arguments.finetuned_gguf_file),
+        ),
     )
-    parser.add_argument("--n-gpu-layers", type=int)
-    parser.add_argument("--n-ctx", type=int, default=8192)
-    return parser
+    missing_gguf = [
+        option
+        for option, model in (
+            ("--base-gguf-file", models[0]),
+            ("--finetuned-gguf-file", models[1]),
+        )
+        if model.gguf_file is None
+    ]
+    if missing_gguf:
+        argument_parser.error(
+            "GGUF filenames are required for repository models: "
+            + ", ".join(missing_gguf)
+        )
+    return models
 
 
-def _select_cases(parser, args):
-    cases = load_cases(args.cases)
-    if args.case_id:
-        selected = set(args.case_id)
-        cases = [case for case in cases if case.id in selected]
-        missing = selected - {case.id for case in cases}
-        if missing:
-            parser.error(f"unknown --case-id values: {', '.join(sorted(missing))}")
-    if args.limit is not None:
-        if args.limit <= 0:
-            parser.error("--limit must be positive")
-        cases = cases[: args.limit]
-    return cases
+def _gguf_file(model, configured_file):
+    if configured_file:
+        return configured_file
+    if Path(model).is_file():
+        return model
+    return None
 
 
-def _format_generated_plan(result):
-    if result.plan is None:
-        return "no plan"
-    return json.dumps(result.plan, sort_keys=True, default=str)
-
-
-def _configure_runtime_dir(path):
-    runtime_dir = Path(path).resolve()
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    os.environ["NLP_RUN_DIR"] = str(runtime_dir)
-    return runtime_dir
-
-
-def _run_cases(args, cases, planner, session, config, logger):
+def _run_cases(cases, model, session, configuration, inference, logger, writer):
     results = []
-    paths = ()
-    for index, case in enumerate(cases):
+    for case_index, case in enumerate(cases):
+        case_inference = inference.for_case(case.id)
         log_event(
             logger,
             "case_start",
             {
                 "case_id": case.id,
-                "phase": "case_setup",
-                "expected_outcome": case.expected_outcome,
+                "model_variant": model.variant.value,
+                "evaluation_mode": configuration.mode.value,
+                "inference": asdict(case_inference),
             },
         )
-        result = evaluate_case(case, planner, session, config, logger)
-        log_event(
+        result = evaluate_case(
+            case,
+            planner,
+            session,
+            configuration,
             logger,
-            "plan_generated",
-            {
-                "case_id": case.id,
-                "phase": "planning",
-                "planner_outcome": result.planner_outcome,
-                "plan": result.plan,
-            },
+            model_variant=model.variant,
+            inference=case_inference,
         )
         results.append(result)
-        paths = write_outputs(results, args.output_dir)
-        log_event(
-            logger,
-            "artifacts_written",
-            {
-                "case_id": case.id,
-                "phase": "artifacts",
-                "paths": [str(path) for path in paths],
-            },
-        )
-        log_event(
-            logger,
-            "case_end",
-            {
-                "case_id": case.id,
-                "phase": result.failure_stage or "complete",
-                "success": result.task_success,
-                "execution_status": result.execution_status,
-                "failure_stage": result.failure_stage,
-                "error": result.error,
-                "total_latency_s": result.total_latency_s,
-            },
-            logging.INFO if result.task_success else logging.ERROR,
-        )
-        status = "PASS" if result.task_success else "FAIL"
-        print(f"[{status}] {case.id}: {result.execution_status}")
-        print(f"  generated plan: {_format_generated_plan(result)}")
-        if result.error:
-            print(f"  {result.error}")
-        if args.visualization_delay > 0 and index < len(cases) - 1:
-            time.sleep(args.visualization_delay)
-    return results, paths
+        writer.append(result)
+        _print_result(result)
+        log_event(logger, "case_end", result.to_record())
+        if configuration.visualization_delay_s > 0 and case_index < len(cases) - 1:
+            time.sleep(configuration.visualization_delay_s)
+    return results
+
+
+def _print_result(result):
+    success = (
+        result.planning_success
+        if result.evaluation_mode == EvaluationMode.PLANNING
+        else result.task_success
+    )
+    status = "PASS" if success else "FAIL"
+    print(
+        f"[{status}] {result.model_variant.value} {result.case.id}: "
+        f"{result.execution_status}"
+    )
+    if result.error:
+        print(f"  {result.error}")
+
+
+def _prepare_output_directory(argument_parser, output_directory):
+    if output_directory.exists() and any(output_directory.iterdir()):
+        argument_parser.error(f"output directory is not empty: {output_directory}")
+    output_directory.mkdir(parents=True, exist_ok=True)
 
 
 def main():
-    parser = _parser()
-    args = parser.parse_args()
-    if not args.validate_world and not args.model:
-        parser.error("--model is required unless --validate-world is used")
-    cases = _select_cases(parser, args)
+    argument_parser = create_parser()
+    arguments = argument_parser.parse_args()
+    cases = select_cases(argument_parser, arguments)
     if not cases:
-        parser.error("no evaluation cases selected")
-    config = EvaluationConfig(
-        world_timeout_s=args.world_timeout,
-        execution_timeout_s=args.execution_timeout,
-        visualization_delay_s=args.visualization_delay,
+        argument_parser.error("no evaluation cases selected")
+
+    configuration = EvaluationConfiguration(
+        mode=arguments.mode,
+        visualization_delay_s=arguments.visualization_delay,
     )
     session = DemoSession(visualize=os.environ.get("NLP_VISUALIZE", "1") != "0")
-
-    if args.validate_world:
-        with tempfile.TemporaryDirectory(prefix="nlp-binder-validate-") as run_dir:
-            _configure_runtime_dir(run_dir)
-            validate_demo_world(cases, session, config)
+    if arguments.validate_world:
+        validate_demo_world(cases, session)
         print(f"Validated {len(cases)} cases against the live CRAM Kitchen.")
         return 0
 
-    if args.output_dir.exists() and any(args.output_dir.iterdir()):
-        parser.error(f"output directory is not empty: {args.output_dir}")
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    runtime_dir = _configure_runtime_dir(args.output_dir / ".runtime")
-
-    log_path = args.output_dir / "evaluation.log"
-    logger = create_log(log_path)
+    models = model_specifications(argument_parser, arguments)
+    _prepare_output_directory(argument_parser, arguments.output_dir)
+    writer = ResultWriter(arguments.output_dir)
+    logger = create_log(arguments.output_dir / "evaluation.log")
+    inference = planner.InferenceConfiguration(
+        seed=arguments.seed,
+        temperature=arguments.temperature,
+        max_tokens=arguments.max_tokens,
+    )
     log_event(
         logger,
         "run_start",
         {
-            "case_id": None,
-            "phase": "run_setup",
-            "model": args.model,
-            "gguf_file": args.gguf_file,
-            "n_ctx": args.n_ctx,
-            "max_tokens": planner.MAX_NEW_TOKENS,
+            "case_ids": [case.id for case in cases],
+            "evaluation_mode": configuration.mode.value,
+            "inference": asdict(inference),
+            "n_ctx": arguments.n_ctx,
             "llama_cpp_version": llama_cpp.__version__,
-            "cases": len(cases),
-            "case_file": str(args.cases),
-            "runtime_dir": str(runtime_dir),
+            "models": [asdict(model) for model in models],
         },
     )
-    gguf_file = (
-        args.gguf_file
-        or os.environ.get("PLANNER_GGUF_FILE")
-        or (args.model if Path(args.model).is_file() else None)
-    )
+
+    results = []
     run_phase = "planner_setup"
     try:
-        planner.setup_planner(
-            args.model,
-            gguf_file=gguf_file,
-            n_gpu_layers=args.n_gpu_layers,
-            n_ctx=args.n_ctx,
-        )
-        run_phase = "cases"
-        results, paths = _run_cases(args, cases, planner, session, config, logger)
-        summary = LiveSummary.from_results(results)
-        run_phase = "report"
-        report_paths = generate_report(paths[1], args.output_dir)
-    except Exception as exc:
+        for model in models:
+            planner.setup_planner(
+                model.model,
+                gguf_file=model.gguf_file,
+                n_gpu_layers=arguments.n_gpu_layers,
+                n_ctx=arguments.n_ctx,
+                inference=inference,
+            )
+            run_phase = f"{model.variant.value}_cases"
+            results.extend(
+                _run_cases(
+                    cases, model, session, configuration, inference, logger, writer
+                )
+            )
+    except Exception as error:
         log_exception(
             logger,
             "run_failure",
             {
-                "case_id": None,
                 "phase": run_phase,
-                "error_type": type(exc).__name__,
-                "error": str(exc),
-                "output_dir": str(args.output_dir),
+                "error_type": type(error).__name__,
+                "error": str(error),
             },
         )
         raise
-    log_event(
-        logger,
-        "run_end",
-        {
-            "case_id": None,
-            "phase": "complete",
-            **asdict(summary),
-            "output_dir": str(args.output_dir),
-        },
-    )
-    planner_rate = summary.metric_rates["planner_success"]["percent"]
-    task_rate = summary.metric_rates["task_success"]["percent"]
-    planner_text = f"{planner_rate:.1f}%" if planner_rate is not None else "n/a"
-    task_text = f"{task_rate:.1f}%" if task_rate is not None else "n/a"
-    print(f"Planner: {planner_text}, task success: {task_text}")
-    print("Wrote " + ", ".join(map(str, (*paths, log_path, *report_paths))))
-    return 0 if task_rate == 100.0 else 1
+
+    summary_path = writer.write_summary(results)
+    summaries = {
+        variant.value: asdict(
+            LiveSummary.from_results(
+                [result for result in results if result.model_variant == variant]
+            )
+        )
+        for variant in ModelVariant
+    }
+    log_event(logger, "run_end", {"summaries": summaries})
+    print(f"Wrote {writer.results_path}, {summary_path}, and evaluation.log")
+    return 0
 
 
 if __name__ == "__main__":

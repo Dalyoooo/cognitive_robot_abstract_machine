@@ -1,25 +1,59 @@
+from __future__ import annotations
+
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from hashlib import sha256
 from pathlib import Path
 
 from huggingface_hub import hf_hub_download
 from llama_cpp import Llama
 
-from ..config import select_backend
-from .prompt import system_prompt, user_instruction, user_turn
-from ..validation.guard import verify
-from ..validation.schema import parse_clarification, parse_plan
+from thesis_demo.config import select_backend
+from thesis_demo.planner.prompt import system_prompt, user_instruction, user_turn
+from thesis_demo.validation.guard import verify
+from thesis_demo.validation.schema import parse_clarification, parse_plan
 
 MAX_NEW_TOKENS = 2048
 N_CTX = 8192
+
+
+@dataclass(frozen=True)
+class InferenceConfiguration:
+    seed: int = 0
+    temperature: float = 0.0
+    max_tokens: int = MAX_NEW_TOKENS
+    base_seed: int | None = None
+
+    def for_case(self, case_identifier):
+        base_seed = self.seed if self.base_seed is None else self.base_seed
+        digest = sha256(f"{base_seed}:{case_identifier}".encode()).digest()
+        case_seed = int.from_bytes(digest[:4], byteorder="big", signed=False)
+        return replace(self, seed=case_seed, base_seed=base_seed)
+
+
+@dataclass(frozen=True)
+class PlannerMetrics:
+    json_valid: bool
+    schema_valid: bool
+    guard_valid: bool
+    rejection_reason: str | None
+    raw_response: str
+
+
+@dataclass(frozen=True)
+class PlannerResult:
+    outcome: str
+    payload: object
+    history: list
+    metrics: PlannerMetrics
 
 
 @dataclass
 class _PlannerState:
     llm: object = field(default=None)
     error: str | None = field(default=None)
-    last_run: dict = field(default_factory=dict)
+    inference: InferenceConfiguration = field(default_factory=InferenceConfiguration)
 
 
 _state = _PlannerState()
@@ -30,10 +64,11 @@ def setup_planner(
     gguf_file=None,
     n_gpu_layers=None,
     n_ctx=N_CTX,
+    inference=None,
 ):
     _state.llm = None
     _state.error = None
-    _state.last_run = {}
+    _state.inference = inference or InferenceConfiguration()
     try:
         print(f"[planner] loading GGUF {model!r} ({gguf_file!r}) ...", flush=True)
         _load_gguf(model, gguf_file, n_gpu_layers, n_ctx)
@@ -93,28 +128,33 @@ def get_error():
     return _state.error
 
 
-def get_last_run_metrics():
-    return dict(_state.last_run)
-
-
 def plan(
     transcript,
     conversation=None,
     context=None,
+    inference=None,
 ):
     messages = (conversation or []) + [{"role": "user", "content": transcript}]
-    for event in _run_loop(messages, context or {}):
+    events = (
+        _run_loop(messages, context or {})
+        if inference is None
+        else _run_loop(messages, context or {}, inference)
+    )
+    for event in events:
         if event["type"] == "done":
-            return (
-                event["outcome"],
-                event["payload"],
-                event["history"],
+            return PlannerResult(
+                outcome=event["outcome"],
+                payload=event["payload"],
+                history=event["history"],
+                metrics=event["metrics"],
             )
 
 
-def plan_stream(transcript, conversation=None, context=None):
+def plan_stream(transcript, conversation=None, context=None, inference=None):
     messages = (conversation or []) + [{"role": "user", "content": transcript}]
-    return _run_loop(messages, context or {})
+    if inference is None:
+        return _run_loop(messages, context or {})
+    return _run_loop(messages, context or {}, inference)
 
 
 def _parse_json_response_with_mode(text):
@@ -136,11 +176,14 @@ def _parse_json_response_with_mode(text):
     return None, "invalid"
 
 
-def _generate_response(messages):
+def _generate_response(messages, inference=None):
+    inference = inference or _state.inference
     stream = _state.llm.create_chat_completion(
         messages=messages,
-        max_tokens=MAX_NEW_TOKENS,
+        max_tokens=inference.max_tokens,
+        seed=inference.seed,
         stream=True,
+        temperature=inference.temperature,
     )
     for chunk in stream:
         delta = chunk["choices"][0]["delta"].get("content")
@@ -163,14 +206,19 @@ def _prepare_messages(messages, context):
     return [system] + model_messages, history_messages
 
 
-def _run_loop(messages, context):
+def _run_loop(messages, context, inference=None):
     if _state.llm is None:
         raise RuntimeError("Planner not initialized. Call setup_planner() first.")
 
     model_messages, history_messages = _prepare_messages(messages, context)
 
     raw_response = ""
-    for delta in _generate_response(model_messages):
+    response = (
+        _generate_response(model_messages)
+        if inference is None
+        else _generate_response(model_messages, inference)
+    )
+    for delta in response:
         raw_response += delta
         yield {"type": "token", "text": delta}
 
@@ -199,13 +247,13 @@ def _run_loop(messages, context):
             schema_valid = False
 
     response_is_valid = outcome is not None
-    _state.last_run = {
-        "json_valid": parse_mode == "exact" and isinstance(parsed_response, dict),
-        "schema_valid": schema_valid,
-        "guard_valid": response_is_valid,
-        "rejection_reason": None if response_is_valid else payload_or_reason,
-        "raw_response": raw_response,
-    }
+    metrics = PlannerMetrics(
+        json_valid=parse_mode == "exact" and isinstance(parsed_response, dict),
+        schema_valid=schema_valid,
+        guard_valid=response_is_valid,
+        rejection_reason=None if response_is_valid else payload_or_reason,
+        raw_response=raw_response,
+    )
 
     history = history_messages
     if response_is_valid:
@@ -216,4 +264,5 @@ def _run_loop(messages, context):
         "outcome": outcome or "error",
         "payload": payload_or_reason,
         "history": history,
+        "metrics": metrics,
     }

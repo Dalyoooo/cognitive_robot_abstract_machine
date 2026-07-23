@@ -48,17 +48,12 @@ class KitchenIsland(CounterTop): ...
 class SinkCounter(CounterTop): ...
 
 
-@dataclass(eq=False)
-class OvenCounter(CounterTop): ...
-
-
 FURNITURE_ANNOTATION_TYPES = (
     CoffeeTable,
     CounterTop,
     Dishwasher,
     Fridge,
     KitchenIsland,
-    OvenCounter,
     Oven,
     SideTable,
     Sink,
@@ -71,7 +66,6 @@ SURFACE_ANNOTATION_TYPES = (
     CoffeeTable,
     CounterTop,
     KitchenIsland,
-    OvenCounter,
     SideTable,
     SinkCounter,
     Table,
@@ -128,7 +122,6 @@ KITCHEN_ROOMS = (RoomSpec(Kitchen, "kitchen", (-1.0, 0.56), (5.6, 4.9)),)
 KITCHEN_FURNITURE = (
     FurnitureAnnotation(KitchenIsland, "kitchen_island_surface"),
     FurnitureAnnotation(SinkCounter, "sink_area_surface"),
-    FurnitureAnnotation(OvenCounter, "oven_area_area"),
     FurnitureAnnotation(Table, "table_area"),
     FurnitureAnnotation(Sink, "sink_area_sink"),
     FurnitureAnnotation(Oven, "oven_area_oven_main"),
@@ -183,7 +176,7 @@ KITCHEN_SURFACE_OBJECTS = (
     SurfacePlacement(
         Pringles,
         "pringles",
-        "oven_area_area",
+        "table_area",
         (0.0, 0.0),
         scale=(0.07, 0.07, 0.20),
     ),

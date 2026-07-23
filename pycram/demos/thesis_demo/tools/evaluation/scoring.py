@@ -1,34 +1,38 @@
+from __future__ import annotations
+
 import json
-import statistics
-from collections import Counter
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-
-from ...validation.guard import (
+from thesis_demo.validation.guard import (
     allowed_locations_for,
     allowed_objects_for,
     context_names,
     verify,
 )
-from ...validation.schema import parse_clarification, parse_plan
+from thesis_demo.validation.schema import parse_clarification, parse_plan
 
 OUTCOMES = {"plan", "clarification"}
 PLAN_FIELDS = {"action", "object", "location", "relation", "source"}
 
 MAIN_METRICS = (
-    "json_valid",
-    "schema_valid",
-    "guard_valid",
-    "planner_success",
+    "planning_success",
     "grounding_success",
     "execution_success",
-    "postcondition_success",
-    "physical_goal_success",
-    "goal_success",
     "task_success",
 )
+
+
+class EvaluationMode(StrEnum):
+    PLANNING = "planning"
+    END_TO_END = "end_to_end"
+
+
+class ModelVariant(StrEnum):
+    BASE = "base"
+    FINETUNED = "finetuned"
 
 
 def _valid_expected_plan(plan, outcome):
@@ -39,10 +43,6 @@ def _valid_expected_plan(plan, outcome):
         isinstance(step, dict) and step and not (set(step) - PLAN_FIELDS)
         for step in steps
     )
-
-
-def json_cell(value):
-    return "" if value is None else json.dumps(value, separators=(",", ":"))
 
 
 @dataclass(frozen=True)
@@ -59,7 +59,6 @@ class LiveCase:
 
     @classmethod
     def from_dict(cls, row):
-        """Create a validated case from one JSONL row."""
         strings = {
             "id": row.get("id"),
             "instruction": row.get("instruction"),
@@ -139,20 +138,22 @@ class LiveCase:
 
 
 @dataclass(frozen=True)
-class EvaluationConfig:
-    world_timeout_s: float = 60.0
-    execution_timeout_s: float = 180.0
-    poll_interval_s: float = 0.2
+class EvaluationConfiguration:
+    mode: EvaluationMode = EvaluationMode.END_TO_END
     visualization_delay_s: float = 0.0
 
 
 @dataclass
 class LiveResult:
     case: LiveCase
+    model_variant: ModelVariant | None = None
+    evaluation_mode: EvaluationMode = EvaluationMode.END_TO_END
     planner_outcome: str = "error"
-    planner_success: bool = False
+    planning_success: bool | None = None
+    grounding_success: bool | None = None
+    execution_success: bool | None = None
     execution_status: str = "not_attempted"
-    task_success: bool = False
+    task_success: bool | None = None
     failure_stage: str | None = None
     error: str | None = None
     planning_latency_s: float = 0.0
@@ -160,40 +161,48 @@ class LiveResult:
     total_latency_s: float = 0.0
     plan: dict[str, Any] | None = None
     raw_responses: list[str] = field(default_factory=list)
+    inference_parameters: dict[str, Any] = field(default_factory=dict)
     metrics: dict[str, Any] = field(default_factory=dict)
 
-    def to_row(self):
-        row = {
+    def to_record(self):
+        return {
             "id": self.case.id,
             "instruction": self.case.instruction,
             "expected_outcome": self.case.expected_outcome,
-            "expected_plan": json_cell(self.case.expected_plan),
-            "clarification_answer": self.case.clarification_answer or "",
-            "expected_clarification_targets": json_cell(
-                self.case.expected_clarification_targets
+            "expected_plan": self.case.expected_plan,
+            "clarification_answer": self.case.clarification_answer,
+            "expected_clarification_targets": self.case.expected_clarification_targets,
+            "expected_follow_up_plan": self.case.expected_follow_up_plan,
+            "model_variant": (
+                self.model_variant.value if self.model_variant is not None else None
             ),
-            "expected_follow_up_plan": json_cell(self.case.expected_follow_up_plan),
+            "evaluation_mode": self.evaluation_mode.value,
             "planner_outcome": self.planner_outcome,
-            "planner_success": self.planner_success,
+            "planning_success": self.planning_success,
+            "grounding_success": self.grounding_success,
+            "execution_success": self.execution_success,
             "execution_status": self.execution_status,
             "task_success": self.task_success,
-            "failure_stage": self.failure_stage or "",
-            "error": self.error or "",
+            "failure_stage": self.failure_stage,
+            "error": self.error,
             "planning_latency_s": self.planning_latency_s,
             "execution_latency_s": self.execution_latency_s,
             "total_latency_s": self.total_latency_s,
-            "plan": json_cell(self.plan),
-            "raw_responses": json_cell(self.raw_responses),
+            "plan": self.plan,
+            "raw_responses": self.raw_responses,
+            "inference": self.inference_parameters,
+            "diagnostics": self.metrics,
         }
-        for name, value in self.metrics.items():
-            row[name] = json_cell(value) if isinstance(value, (dict, list)) else value
-        return row
 
 
 def _metric_value(result, name):
-    if name in result.metrics:
-        return result.metrics[name]
-    return getattr(result, name, None)
+    values = {
+        "planning_success": result.planning_success,
+        "grounding_success": result.grounding_success,
+        "execution_success": result.execution_success,
+        "task_success": result.task_success,
+    }
+    return values[name]
 
 
 def metric_counts(results, name):
@@ -202,77 +211,60 @@ def metric_counts(results, name):
     return sum(bool(value) for value in values), len(values)
 
 
-def confusion_rates(tp, fp, fn, tn):
-    precision = tp / (tp + fp) if tp + fp else None
-    recall = tp / (tp + fn) if tp + fn else None
-    f1 = 2 * tp / (2 * tp + fp + fn) if 2 * tp + fp + fn else None
-    return precision, recall, f1
+@dataclass(frozen=True)
+class MetricAggregate:
+    successes: int
+    observed_cases: int
+    total_cases: int
 
+    @classmethod
+    def from_results(cls, results, name):
+        relevant_results = results
+        if name != "planning_success":
+            relevant_results = [
+                result
+                for result in results
+                if result.evaluation_mode == EvaluationMode.END_TO_END
+            ]
+        successes, observed_cases = metric_counts(relevant_results, name)
+        return cls(successes, observed_cases, len(relevant_results))
 
-def clarification_summary(results):
-    outcomes = Counter(
-        result.metrics.get("clarification_outcome") for result in results
-    )
-    tp = outcomes.get("TP", 0)
-    fp = outcomes.get("FP", 0)
-    fn = outcomes.get("FN", 0)
-    tn = outcomes.get("TN", 0)
-    precision, recall, f1 = confusion_rates(tp, fp, fn, tn)
-    scripted = [result for result in results if result.case.clarification_answer]
-    return {
-        "tp": tp,
-        "fp": fp,
-        "fn": fn,
-        "tn": tn,
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
-        "scripted_cases": len(scripted),
-        "scripted_successes": sum(
-            bool(result.metrics.get("dialog_resolution_success")) for result in scripted
-        ),
-    }
+    @property
+    def stage_percent(self):
+        if not self.observed_cases:
+            return None
+        return round(100.0 * self.successes / self.observed_cases, 1)
+
+    @property
+    def benchmark_percent(self):
+        if not self.total_cases:
+            return None
+        return round(100.0 * self.successes / self.total_cases, 1)
+
+    def to_record(self):
+        return {
+            "successes": self.successes,
+            "observed_cases": self.observed_cases,
+            "total_cases": self.total_cases,
+            "stage_percent": self.stage_percent,
+            "benchmark_percent": self.benchmark_percent,
+        }
 
 
 @dataclass(frozen=True)
 class LiveSummary:
     cases: int
     metric_rates: dict[str, Any]
-    clarification: dict[str, Any]
-    failure_stages: dict[str, int]
-    mean_planning_latency_s: float | None
-    mean_execution_latency_s: float | None
-    mean_total_latency_s: float | None
 
     @classmethod
     def from_results(cls, results):
         metric_rates = {}
         for name in MAIN_METRICS:
-            successes, observed = metric_counts(results, name)
-            metric_rates[name] = {
-                "successes": successes,
-                "cases": observed,
-                "percent": 100.0 * successes / observed if observed else None,
-            }
-
-        planned = [r for r in results if r.metrics.get("planning_attempted")]
-        executed = [r for r in results if r.metrics.get("execution_attempted")]
-        failure_stages = Counter(
-            result.failure_stage for result in results if result.failure_stage
-        )
-
-        def _mean(values):
-            values = list(values)
-            return statistics.fmean(values) if values else None
+            metric_rates[name] = MetricAggregate.from_results(results, name).to_record()
 
         return cls(
             cases=len(results),
             metric_rates=metric_rates,
-            clarification=clarification_summary(results),
-            failure_stages=dict(sorted(failure_stages.items())),
-            mean_planning_latency_s=_mean(r.planning_latency_s for r in planned),
-            mean_execution_latency_s=_mean(r.execution_latency_s for r in executed),
-            mean_total_latency_s=_mean(r.total_latency_s for r in results),
         )
 
 
@@ -331,16 +323,6 @@ def reference_match(case, payload):
     return _reference_satisfied(steps, case.expected_plan)
 
 
-def exact_plan_match(case, payload):
-    expected = case.expected_plan
-    if case.expected_outcome != "plan" or not isinstance(expected, list):
-        return None
-    steps = payload.get("plan", []) if isinstance(payload, dict) else []
-    return len(steps) == len(expected) and all(
-        _step_matches(step, reference) for step, reference in zip(steps, expected)
-    )
-
-
 def allowed_names_for_step(step, names):
     action = step.get("action")
     relation = step.get("relation")
@@ -349,18 +331,6 @@ def allowed_names_for_step(step, names):
         "location": allowed_locations_for(action, relation, names),
         "source": names.sources,
     }
-
-
-def has_hallucinated_name(plan, context):
-    names = context_names(context)
-    for step in plan.get("plan", []):
-        if not isinstance(step, dict):
-            continue
-        for field_name, allowed_names in allowed_names_for_step(step, names).items():
-            value = step.get(field_name)
-            if value and value not in allowed_names:
-                return True
-    return False
 
 
 def plan_quality_metrics(case, outcome, payload, context, planner_metadata=None):
@@ -382,15 +352,9 @@ def plan_quality_metrics(case, outcome, payload, context, planner_metadata=None)
             else:
                 parse_plan(normalized)
             schema_valid = True
-        except Exception:
+        except ValueError:
             schema_valid = False
         guard_valid = schema_valid and verify(normalized, context)[0]
-
-    hallucination = (
-        has_hallucinated_name(payload, context)
-        if outcome == "plan" and isinstance(payload, dict)
-        else None
-    )
 
     return {
         "json_valid": json_valid,
@@ -399,8 +363,6 @@ def plan_quality_metrics(case, outcome, payload, context, planner_metadata=None)
         "plan_valid": bool(schema_valid and guard_valid),
         "outcome_match": outcome == case.expected_outcome,
         "reference_goal_match": reference_match(case, payload),
-        "exact_plan_match": exact_plan_match(case, payload),
-        "hallucination": hallucination,
     }
 
 
@@ -438,17 +400,12 @@ def validate_entities(case, context, label):
 
 
 def covered_objects(cases):
-    """Return every object id the benchmark goals manipulate."""
     return {
-        goal["object"]
-        for case in cases
-        for goal in case.goals()
-        if goal.get("object")
+        goal["object"] for case in cases for goal in case.goals() if goal.get("object")
     }
 
 
 def live_entity_names(context):
-    """Return every entity id the live world context exposes."""
     names = set()
     for key in ("objects", "surfaces", "containers", "openables", "furniture", "rooms"):
         names.update(context.get(key, []))
@@ -457,17 +414,9 @@ def live_entity_names(context):
 
 
 def validate_kitchen_inventory(context, cases, label):
-    """Reject a live world missing an entity the benchmark references.
-
-    Coverage is derived from the cases rather than a frozen list, so adding
-    new objects to the world never breaks the benchmark; only a referenced
-    entity that the live world no longer provides is an error.
-    """
     missing = sorted(covered_objects(cases) - live_entity_names(context))
     if missing:
-        raise ValueError(
-            f"{label} is missing benchmark objects: {', '.join(missing)}"
-        )
+        raise ValueError(f"{label} is missing benchmark objects: {', '.join(missing)}")
 
 
 def load_cases(path=CASES_FILE):
@@ -479,6 +428,8 @@ def load_cases(path=CASES_FILE):
     ids = [case.id for case in cases]
     if not cases or len(ids) != len(set(ids)):
         raise ValueError("case file requires non-empty unique ids")
+    if any(len(case_id) != 3 or not case_id.isdecimal() for case_id in ids):
+        raise ValueError("case ids must contain exactly three decimal digits")
 
     for case in cases:
         if case.environment != "kitchen":

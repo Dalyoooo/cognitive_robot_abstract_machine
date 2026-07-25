@@ -71,10 +71,10 @@ def _is_below(world, body, possible_parent):
     return body in world.get_kinematic_structure_entities_of_branch(possible_parent)
 
 
-def _held_objects(mapper, robot, object_names):
+def _held_objects(mapper, object_names):
     tool_frames = []
     for arm in mapper.arms:
-        end_effector = ViewManager.get_end_effector_view(arm, robot)
+        end_effector = ViewManager.get_end_effector_view(arm, mapper.context.robot)
         tool_frames.append(end_effector.tool_frame)
 
     held_objects = []

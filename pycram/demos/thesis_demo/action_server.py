@@ -11,9 +11,8 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import String
 from thesis_demo_msgs.action import ExecutePlan
 
-from thesis_demo.execution.execution import run_plan
-from thesis_demo.execution.grounding import GroundingError
-from thesis_demo.planner.world_context import build_world_context
+from thesis_demo.execution.execution import run_plan_as_result
+from thesis_demo.planner.world_context import PlannerNames, build_world_context
 from thesis_demo.validation.schema import parse_plan
 from thesis_demo.world.nlp_demo import build_world
 
@@ -62,14 +61,16 @@ def _latched_qos():
 @dataclass
 class PlanExecutor:
     node: object
-    world: object
-    robot: object
     context: object
     busy: bool = False
+    names: object = field(init=False, default=None)
     context_publisher: object = field(init=False, default=None)
     action_server: object = field(init=False, default=None)
 
     def start(self):
+        # Planner names only depend on body names and annotation types, which
+        # execution never changes, so they are built once per world.
+        self.names = PlannerNames.build(self.context.world)
         self.context_publisher = self.node.create_publisher(
             String, CONTEXT_TOPIC, _latched_qos()
         )
@@ -107,7 +108,9 @@ class PlanExecutor:
             self.busy = False
 
     def publish_context(self):
-        context_data = build_world_context(self.world, self.robot)
+        context_data = build_world_context(
+            self.context.world, self.context.robot, self.names
+        )
         _atomic_write_json(_context_file(), context_data)
         message = String()
         message.data = json.dumps(context_data)
@@ -125,28 +128,15 @@ class PlanExecutor:
             feedback.step_json = json.dumps(step)
             goal_handle.publish_feedback(feedback)
 
-        try:
-            observations = run_plan(
-                self.world,
-                self.robot,
-                self.context,
-                steps,
-                step_callback=publish_feedback,
-            )
-        except GroundingError as error:
-            return _error_result(
-                "grounding", str(error), grounding_error=error.to_dict()
-            )
-        except Exception as error:
-            self.node.get_logger().error(
-                f"Execution failed: {error!r}\n{traceback.format_exc()}"
-            )
-            return _error_result(
-                "execution",
-                f"{type(error).__name__}: {error}",
-                error_type=type(error).__name__,
-            )
-        return {"status": "ok", "phase": "execution", "observations": observations}
+        result = run_plan_as_result(
+            self.context,
+            steps,
+            step_callback=publish_feedback,
+            names=self.names,
+        )
+        if result["phase"] == "execution" and result["status"] == "error":
+            self.node.get_logger().error(f"Execution failed: {result['error']}")
+        return result
 
     def _refresh_context_before_result(self, result):
         try:
@@ -176,7 +166,7 @@ def main():
     # Initialize ROS once up front.
     rclpy.init()
     try:
-        world, robot, context, visualization_node = _build_selected_world()
+        context, visualization_node = _build_selected_world()
     except Exception as error:
         # Startup failures are persisted because no action result can exist yet.
         message = f"World setup failed: {type(error).__name__}: {error}"
@@ -185,7 +175,7 @@ def main():
         raise SystemExit(1)
 
     node = rclpy.create_node("thesis_demo_executor")
-    plan_executor = PlanExecutor(node, world, robot, context)
+    plan_executor = PlanExecutor(node, context)
     plan_executor.start()
 
     ros_executor = SingleThreadedExecutor()

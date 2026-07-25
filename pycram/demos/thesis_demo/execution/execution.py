@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-import pycram.alternative_motion_mappings.tiago_motion_mapping as _tiago_motion_mapping  # noqa: F401
+import pycram.alternative_motion_mappings.tiago_motion_mapping  # noqa: F401
 from pycram.datastructures.enums import (
     ApproachDirection,
     Arms,
@@ -38,8 +38,6 @@ ACTIONS_WITH_INTERNAL_NAVIGATION = {
 
 @dataclass
 class ActionMapper:
-    world: object
-    robot: object
     context: object
     names: object = None
     grounding: Grounding = field(init=False)
@@ -49,8 +47,10 @@ class ActionMapper:
     _dispatch: dict = field(init=False)
 
     def __post_init__(self):
-        self.grounding = Grounding(self.world, self.robot, names=self.names)
-        arm_count = len(self.robot.get_arms())
+        self.grounding = Grounding(
+            self.context.world, self.context.robot, names=self.names
+        )
+        arm_count = len(self.context.robot.get_arms())
         if arm_count == 1:
             self.arms = [Arms.LEFT]
         elif arm_count == 2:
@@ -103,15 +103,20 @@ class ActionMapper:
             executed_action.target_location,
         )
 
+    def _require_empty_gripper(self, verb, object_name):
+        """Both grasping actions need the gripper free before they start."""
+        if self.pending_pickup is None:
+            return
+        pending_name = str(self.pending_pickup.object_designator.name)
+        raise GroundingError(
+            f"Cannot {verb} {object_name!r}: "
+            f"PickUpAction for {pending_name!r} still needs PlaceAction"
+        )
+
     def _transport(self, object_name, location, relation, source):
-        if self.pending_pickup is not None:
-            pending_name = str(self.pending_pickup.object_designator.name)
-            raise GroundingError(
-                f"Cannot transport {object_name!r}: "
-                f"PickUpAction for {pending_name!r} still needs PlaceAction"
-            )
+        self._require_empty_gripper("transport", object_name)
         body = self.grounding.resolve_body(object_name, source)
-        place_pose = self.grounding.placement_pose(location, body, relation)
+        place_pose = self.grounding.placement_poses(location, body, relation)[0]
         return TransportAction(
             object_designator=body,
             target_location=place_pose,
@@ -119,12 +124,7 @@ class ActionMapper:
         )
 
     def _pick_up(self, object_name, _location, _relation, source):
-        if self.pending_pickup is not None:
-            pending_name = str(self.pending_pickup.object_designator.name)
-            raise GroundingError(
-                f"Cannot pick up {object_name!r}: "
-                f"PickUpAction for {pending_name!r} still needs PlaceAction"
-            )
+        self._require_empty_gripper("pick up", object_name)
         body = self.grounding.resolve_body(object_name, source)
         pickup_pose, arm = self._resolve_reachable(
             body.global_pose,
@@ -168,8 +168,6 @@ class ActionMapper:
                     grasp_description=grasp_description,
                 )
             except GroundingError as error:
-                # A surface provides several samples. An unreachable sample does
-                # not invalidate the remaining pyCRAM candidates.
                 last_error = error
                 continue
 
@@ -196,9 +194,6 @@ class ActionMapper:
         return self._container_action(CloseAction, object_name)
 
     def _container_action(self, action_type, object_name):
-        # pyCRAM's AccessingLocation rotates its targets about the world origin,
-        # which puts the goal underground for furniture at negative x. A front
-        # grasp on the handle reaches the same poses without that.
         handle = self.grounding.resolve_handle(object_name)
         base_pose, arm = self._resolve_reachable(
             handle.global_pose,
@@ -212,21 +207,20 @@ class ActionMapper:
         ]
 
     def _navigate(self, _object_name, location, _relation, _source):
-        label = location
-        annotation = self.grounding.resolve_annotation(label)
+        annotation = self.grounding.resolve_annotation(location)
         if annotation is None:
-            raise GroundingError(f"Cannot navigate to {label!r}: Not found in world")
+            raise GroundingError(f"Cannot navigate to {location!r}: Not found in world")
 
         try:
             base_pose = CostmapLocation(
-                target=self.grounding.navigation_pose(label, annotation),
+                target=self.grounding.navigation_pose(location, annotation),
                 reachable=False,
                 context=self.context,
             ).ground()
         except StopIteration as error:
             # CostmapLocation signals an empty candidate generator this way.
             raise GroundingError(
-                f"No collision-free navigation pose for {label!r}"
+                f"No collision-free navigation pose for {location!r}"
             ) from error
         return NavigateAction(target_location=base_pose)
 
@@ -295,7 +289,6 @@ def _map_step(mapper, step, step_index):
         error.attach_step(step_index, step)
         raise
     except StopIteration as error:
-        # Keep pyCRAM's exhausted location iterator out of the planner API.
         raise GroundingError(
             "No reachable pose found while grounding the step",
             step_index=step_index,
@@ -329,7 +322,7 @@ class _ExecutedStep:
     combined_with: str = None
 
 
-def _complete_observations(mapper, robot, executed_steps):
+def _complete_observations(mapper, executed_steps):
     observations = {
         "navigation": [],
         "container_states": {},
@@ -339,7 +332,7 @@ def _complete_observations(mapper, robot, executed_steps):
     }
 
     container_names = []
-    picked_object_names = []
+    handled_object_names = []
     for position, executed in enumerate(executed_steps):
         step = executed.step
         action_name = step.get("action")
@@ -353,8 +346,6 @@ def _complete_observations(mapper, robot, executed_steps):
                 }
             )
         if executed.combined_with is not None:
-            # The combined navigation runs as the first action of the next
-            # step; its recorded end pose is the navigation observation.
             navigation_node = executed_steps[position + 1].nodes[0]
             observations["navigation"].append(
                 _navigation_observation(
@@ -376,10 +367,12 @@ def _complete_observations(mapper, robot, executed_steps):
             container_name = step.get("object")
             if container_name not in container_names:
                 container_names.append(container_name)
-        if action_name == "PickUpAction":
+        # Every object the plan handled is reported, whether the gripper was
+        # meant to end up holding it or not, so callers can check both.
+        if action_name in {"PickUpAction", "PlaceAction", "TransportAction"}:
             object_name = step.get("object")
-            if object_name not in picked_object_names:
-                picked_object_names.append(object_name)
+            if object_name not in handled_object_names:
+                handled_object_names.append(object_name)
 
     for container_name in container_names:
         observations["container_states"][container_name] = _container_state(
@@ -387,16 +380,12 @@ def _complete_observations(mapper, robot, executed_steps):
             container_name,
         )
 
-    observations["held_objects"] = _held_objects(
-        mapper,
-        robot,
-        picked_object_names,
-    )
+    observations["held_objects"] = _held_objects(mapper, handled_object_names)
     return observations
 
 
-def run_plan(world, robot, context, steps, step_callback=None, names=None):
-    mapper = ActionMapper(world, robot, context, names=names)
+def run_plan(context, steps, step_callback=None, names=None):
+    mapper = ActionMapper(context, names=names)
     plan_root = sequential([], context=context)
     executed_steps = []
     unreported_steps = []
@@ -424,12 +413,12 @@ def run_plan(world, robot, context, steps, step_callback=None, names=None):
                     nodes.append(action_node)
                     conditions.append(_post_condition_ok(action))
             except (TimeoutError, GroundingError):
-                # Callers report a grounding failure as its own phase.
                 raise
             except StopIteration as error:
-                raise RuntimeError(
-                    f"Step {step_index} ({step.get('action')}): "
-                    "No reachable pose found during execution"
+                raise GroundingError(
+                    "No reachable pose found while grounding the step",
+                    step_index=step_index,
+                    action=step.get("action"),
                 ) from error
             except Exception as error:
                 raise RuntimeError(
@@ -446,4 +435,31 @@ def run_plan(world, robot, context, steps, step_callback=None, names=None):
                 unreported_steps.clear()
                 step_callback(step_index, step)
 
-    return _complete_observations(mapper, robot, executed_steps)
+    return _complete_observations(mapper, executed_steps)
+
+
+def run_plan_as_result(context, steps, step_callback=None, names=None):
+    """
+    Run a plan and describe the outcome the way every caller reports it.
+    """
+    try:
+        observations = run_plan(
+            context, steps, step_callback=step_callback, names=names
+        )
+    except TimeoutError:
+        raise
+    except GroundingError as error:
+        return {
+            "status": "error",
+            "phase": "grounding",
+            "error": str(error),
+            "grounding_error": error.to_dict(),
+        }
+    except Exception as error:
+        return {
+            "status": "error",
+            "phase": "execution",
+            "error": f"{type(error).__name__}: {error}",
+            "error_type": type(error).__name__,
+        }
+    return {"status": "ok", "phase": "execution", "observations": observations}

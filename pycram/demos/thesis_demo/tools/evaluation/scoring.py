@@ -10,19 +10,14 @@ from thesis_demo.validation.guard import (
     allowed_locations_for,
     allowed_objects_for,
     context_names,
-    verify,
 )
-from thesis_demo.validation.schema import (
-    PLAN_STEP_FIELDS,
-    parse_clarification,
-    parse_plan,
-)
+from thesis_demo.validation.schema import DIRECTIONAL_RELATIONS, PLAN_STEP_FIELDS
 
 OUTCOMES = {"plan", "clarification"}
 
 MAIN_METRICS = (
     "planning_success",
-    "grounding_success",
+    "reachability_success",
     "execution_success",
     "task_success",
 )
@@ -46,6 +41,28 @@ def _valid_expected_plan(plan, outcome):
         isinstance(step, dict) and step and not (set(step) - PLAN_STEP_FIELDS)
         for step in steps
     )
+
+
+def _validate_clarification(case_id, answer, targets, follow_up_plan):
+    """Check the fields only a clarification case is allowed to carry."""
+    if not isinstance(targets, list) or not targets:
+        raise ValueError(
+            f"{case_id}: expected_clarification_targets must be "
+            "a non-empty string list"
+        )
+    if not all(isinstance(target, str) and target.strip() for target in targets):
+        raise ValueError(
+            f"{case_id}: expected_clarification_targets must be "
+            "a non-empty string list"
+        )
+
+    # A case may either just ask the question, or script the whole dialog.
+    if answer is None and follow_up_plan is None:
+        return
+    if not isinstance(answer, str) or not answer.strip():
+        raise ValueError(f"{case_id}: invalid clarification_answer")
+    if not _valid_expected_plan(follow_up_plan, "plan"):
+        raise ValueError(f"{case_id}: invalid expected_follow_up_plan")
 
 
 @dataclass(frozen=True)
@@ -83,32 +100,14 @@ class LiveCase:
         if plan is not None and not _valid_expected_plan(plan, outcome):
             raise ValueError(f"{strings['id']}: invalid expected_plan")
 
-        clarification_fields = (answer, targets, follow_up_plan)
-        if outcome == "clarification":
-            if (
-                not isinstance(targets, list)
-                or not targets
-                or not all(
-                    isinstance(target, str) and target.strip() for target in targets
-                )
-            ):
+        if outcome != "clarification":
+            if any(value is not None for value in (answer, targets, follow_up_plan)):
                 raise ValueError(
-                    f"{strings['id']}: expected_clarification_targets must be "
-                    "a non-empty string list"
+                    f"{strings['id']}: clarification fields require "
+                    "expected_outcome='clarification'"
                 )
-            scripted_dialog = answer is not None or follow_up_plan is not None
-            if scripted_dialog:
-                if not isinstance(answer, str) or not answer.strip():
-                    raise ValueError(f"{strings['id']}: invalid clarification_answer")
-                if not _valid_expected_plan(follow_up_plan, "plan"):
-                    raise ValueError(
-                        f"{strings['id']}: invalid expected_follow_up_plan"
-                    )
-        elif any(value is not None for value in clarification_fields):
-            raise ValueError(
-                f"{strings['id']}: clarification fields require "
-                "expected_outcome='clarification'"
-            )
+        else:
+            _validate_clarification(strings["id"], answer, targets, follow_up_plan)
 
         return cls(
             **strings,
@@ -161,7 +160,7 @@ class LiveResult:
     evaluation_mode: EvaluationMode = EvaluationMode.END_TO_END
     planner_outcome: str = "error"
     planning_success: bool | None = None
-    grounding_success: bool | None = None
+    reachability_success: bool | None = None
     execution_success: bool | None = None
     execution_status: str = "not_attempted"
     timed_out: bool = False
@@ -191,7 +190,7 @@ class LiveResult:
             "evaluation_mode": self.evaluation_mode.value,
             "planner_outcome": self.planner_outcome,
             "planning_success": self.planning_success,
-            "grounding_success": self.grounding_success,
+            "reachability_success": self.reachability_success,
             "execution_success": self.execution_success,
             "execution_status": self.execution_status,
             "timed_out": self.timed_out,
@@ -211,7 +210,7 @@ class LiveResult:
 def _metric_value(result, name):
     values = {
         "planning_success": result.planning_success,
-        "grounding_success": result.grounding_success,
+        "reachability_success": result.reachability_success,
         "execution_success": result.execution_success,
         "task_success": result.task_success,
     }
@@ -346,37 +345,313 @@ def allowed_names_for_step(step, names):
     }
 
 
-def plan_quality_metrics(case, outcome, payload, context, planner_metadata=None):
-    planner_metadata = planner_metadata or {}
-    normalized = {"clarification": payload} if outcome == "clarification" else payload
-    parsed_payload = (outcome == "plan" and isinstance(payload, dict)) or (
-        outcome == "clarification" and isinstance(payload, str)
-    )
-    json_valid = bool(planner_metadata.get("json_valid", parsed_payload))
-    schema_valid = False
-    guard_valid = False
-    if outcome == "error":
-        schema_valid = bool(planner_metadata.get("schema_valid", False))
-        guard_valid = bool(planner_metadata.get("guard_valid", False))
-    elif parsed_payload:
-        try:
-            if outcome == "clarification":
-                parse_clarification(normalized)
-            else:
-                parse_plan(normalized)
-            schema_valid = True
-        except ValueError:
-            schema_valid = False
-        guard_valid = schema_valid and verify(normalized, context)[0]
+def plan_quality_metrics(case, outcome, payload, planner_metadata=None):
+    """What the planner got right, gate by gate.
 
+    The planner already validated this response to decide the outcome, so its
+    own report is the answer; re-running the schema and guard here could only
+    ever repeat it.
+    """
+    planner_metadata = planner_metadata or {}
     return {
-        "json_valid": json_valid,
-        "schema_valid": schema_valid,
-        "guard_valid": guard_valid,
-        "plan_valid": bool(schema_valid and guard_valid),
+        "json_object_valid": bool(planner_metadata.get("json_valid")),
+        "schema_valid": bool(planner_metadata.get("schema_valid")),
+        "names_valid": planner_metadata.get("names_valid"),
+        "sequence_valid": planner_metadata.get("sequence_valid"),
         "outcome_match": outcome == case.expected_outcome,
-        "reference_goal_match": reference_match(case, payload),
+        "planned_goal_match": reference_match(case, payload),
     }
+
+
+class FailedCheck(StrEnum):
+    """The gates a case passes through, in the order they are decided."""
+
+    JSON_OBJECT = "json_object"
+    SCHEMA = "schema"
+    NAMES = "names"
+    SEQUENCE = "sequence"
+    OUTCOME = "outcome"
+    CLARIFICATION_TARGET = "clarification_target"
+    PLANNED_GOAL = "planned_goal"
+    REACHABILITY = "reachability"
+    EXECUTION = "execution"
+    WORLD_GOAL = "world_goal"
+
+
+def first_failed_check(metrics, reachability_success, execution_success):
+    """The earliest gate this case did not pass, or None if it passed them all.
+
+    ``None`` for a metric means the gate never ran, which is not a failure.
+    """
+    gates = (
+        (FailedCheck.JSON_OBJECT, metrics.get("json_object_valid")),
+        (FailedCheck.SCHEMA, metrics.get("schema_valid")),
+        (FailedCheck.NAMES, metrics.get("names_valid")),
+        (FailedCheck.SEQUENCE, metrics.get("sequence_valid")),
+        (FailedCheck.OUTCOME, metrics.get("outcome_match")),
+        (FailedCheck.CLARIFICATION_TARGET, metrics.get("clarification_target_match")),
+        (FailedCheck.PLANNED_GOAL, metrics.get("planned_goal_match")),
+        (FailedCheck.REACHABILITY, reachability_success),
+        (FailedCheck.EXECUTION, execution_success),
+        (FailedCheck.WORLD_GOAL, metrics.get("world_goal_reached")),
+    )
+    for gate, passed in gates:
+        if passed is False:
+            return gate.value
+    return None
+
+
+@dataclass
+class GoalChecks:
+    """
+    One family of end-state expectations and how they turned out.
+    """
+
+    expected: int = 0
+    checked: int = 0
+    errors: list = field(default_factory=list)
+    unavailable: list = field(default_factory=list)
+
+    def record(self, passed, description):
+        self.expected += 1
+        self.checked += 1
+        if not passed:
+            self.errors.append(f"not satisfied: {description}")
+
+    def skip(self, description, reason):
+        self.expected += 1
+        self.unavailable.append(f"{description}: {reason}")
+
+    def merged_with(self, other):
+        return GoalChecks(
+            expected=self.expected + other.expected,
+            checked=self.checked + other.checked,
+            errors=self.errors + other.errors,
+            unavailable=self.unavailable + other.unavailable,
+        )
+
+    @property
+    def success(self):
+        if not self.expected:
+            return None
+        return self.checked == self.expected and not self.errors
+
+
+def final_location_goals(case):
+    goals_by_object = {}
+    for goal in case.goals():
+        object_name = goal.get("object")
+        if object_name and goal.get("location"):
+            goals_by_object[object_name] = goal
+    return list(goals_by_object.values())
+
+
+def _final_action_per_object(case):
+    """The last thing the benchmark says about each object."""
+    actions = {}
+    for goal in case.goals():
+        if goal.get("action") and goal.get("object"):
+            actions[goal["object"]] = goal["action"]
+    return actions
+
+
+def _containers_left_open_on_purpose(case):
+    """Containers the task itself asks to leave open at the end."""
+    left_open = {}
+    for goal in case.goals():
+        if goal.get("action") == "OpenAction":
+            left_open[goal.get("object")] = True
+        elif goal.get("action") == "CloseAction":
+            left_open[goal.get("object")] = False
+    return {name for name, is_open in left_open.items() if is_open}
+
+
+def location_checks(case, final_context):
+    """Did every object the task moves end up where it was supposed to?"""
+    checks = GoalChecks()
+    locations = final_context.get("object_locations")
+    for goal in final_location_goals(case):
+        if goal.get("relation") in DIRECTIONAL_RELATIONS:
+            # A directional placement is judged geometrically, by physical_checks.
+            continue
+
+        object_name = goal["object"]
+        expected = goal["location"]
+        expected = expected if isinstance(expected, list) else [expected]
+        description = f"location: {object_name!r} is at one of {expected!r}"
+
+        if not isinstance(locations, dict) or not locations.get(object_name):
+            checks.skip(description, "final location is not in the world context")
+            continue
+        checks.record(
+            bool(set(locations[object_name]).intersection(expected)),
+            f"{description}, but it is at {locations[object_name]!r}",
+        )
+    return checks
+
+
+def physical_checks(case, observations):
+    checks = GoalChecks()
+    observations = observations if isinstance(observations, dict) else {}
+    _check_final_navigation(checks, case, observations)
+    _check_containers(checks, case, observations)
+    _check_gripper(checks, case, observations)
+    _check_directions(checks, case, observations)
+    return checks
+
+
+def _check_final_navigation(checks, case, observations):
+    goals = case.goals()
+    if not goals or goals[-1].get("action") != "NavigateAction":
+        return
+    location = goals[-1].get("location")
+    description = f"navigation: arrived at {location!r}"
+
+    navigation = observations.get("navigation")
+    if not isinstance(navigation, list) or not navigation:
+        checks.skip(description, "no navigation was observed")
+        return
+    arrival = navigation[-1]
+    checks.record(
+        field_matches(arrival.get("location"), location)
+        and arrival.get("success") is True,
+        description,
+    )
+
+
+def _check_containers(checks, case, observations):
+    states = observations.get("container_states")
+    if not isinstance(states, dict):
+        return
+    left_open = _containers_left_open_on_purpose(case)
+
+    for container_name in sorted(states):
+        expected_state = "open" if container_name in left_open else "closed"
+        description = f"container: {container_name!r} is {expected_state}"
+        actual_state = states[container_name]
+        if actual_state is None or actual_state == "unknown":
+            checks.skip(description, "the container state could not be read")
+            continue
+        checks.record(actual_state == expected_state, description)
+
+
+def _check_gripper(checks, case, observations):
+    """Objects the task says to hold must be held, and everything the robot put
+    down must actually have been let go."""
+    held_objects = observations.get("held_objects")
+    if not isinstance(held_objects, list):
+        return
+    final_actions = _final_action_per_object(case)
+
+    for object_name, action in sorted(final_actions.items()):
+        if action == "PickUpAction":
+            checks.record(
+                object_name in held_objects, f"gripper: {object_name!r} is held"
+            )
+
+    for goal in final_location_goals(case):
+        object_name = goal["object"]
+        if final_actions.get(object_name) == "PickUpAction":
+            continue
+        checks.record(
+            object_name not in held_objects,
+            f"gripper: {object_name!r} was released",
+        )
+
+
+def _check_directions(checks, case, observations):
+    results = observations.get("directional_relations")
+    for goal in final_location_goals(case):
+        if goal.get("relation") not in DIRECTIONAL_RELATIONS:
+            continue
+        description = (
+            f"direction: {goal['object']!r} is "
+            f"{goal['relation']} {goal['location']!r}"
+        )
+        if not isinstance(results, list):
+            checks.skip(description, "no directional relation was observed")
+            continue
+
+        # The last observation for this goal is the one that counts.
+        outcome = None
+        for result in reversed(results):
+            if (
+                result.get("object") == goal["object"]
+                and result.get("relation") == goal["relation"]
+                and field_matches(result.get("location"), goal["location"])
+            ):
+                outcome = result.get("success")
+                break
+        if not isinstance(outcome, bool):
+            checks.skip(description, "no directional relation was observed")
+            continue
+        checks.record(outcome, description)
+
+
+def post_condition_failures(observations):
+    failures = []
+    for step in observations.get("steps", []):
+        if step.get("condition_ok") is not False:
+            continue
+        object_name = step.get("object")
+        target = f"({object_name})" if object_name else ""
+        failures.append(f"post-condition after {step['action']}{target}")
+    return failures
+
+
+def empty_metrics():
+    return {
+        "json_object_valid": None,
+        "schema_valid": None,
+        "names_valid": None,
+        "sequence_valid": None,
+        "outcome_match": None,
+        "clarification_target_match": None,
+        "planned_goal_match": None,
+        "attempts": None,
+        "first_failed_check": None,
+        **_world_metrics(GoalChecks(), []),
+    }
+
+
+def _world_metrics(checks, post_conditions):
+    return {
+        "world_goal_reached": checks.success,
+        "world_checks_expected": checks.expected,
+        "world_checks_evaluated": checks.checked,
+        "world_failures": checks.errors,
+        "world_unchecked": checks.unavailable,
+        "post_condition_failures": post_conditions,
+    }
+
+
+def verified_goal_metrics(case, final_context, observations):
+    observations = observations if isinstance(observations, dict) else {}
+    checks = location_checks(case, final_context)
+    checks = checks.merged_with(physical_checks(case, observations))
+    return _world_metrics(checks, post_condition_failures(observations))
+
+
+def task_succeeded(
+    case,
+    planning_success,
+    execution_status,
+    world_goal_reached,
+    planned_goal_match=None,
+    clarification_target_match=None,
+):
+    if not planning_success:
+        return False
+    if case.expected_outcome == "clarification":
+        if clarification_target_match is not True:
+            return False
+        if not case.clarification_answer:
+            return execution_status == "not_required"
+    if execution_status != "ok":
+        return False
+    if world_goal_reached is not None:
+        return world_goal_reached
+    return planned_goal_match is True
 
 
 CASES_FILE = Path(__file__).with_name("kitchen_eval_samples.jsonl")

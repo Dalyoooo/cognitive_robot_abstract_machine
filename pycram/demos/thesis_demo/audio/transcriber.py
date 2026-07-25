@@ -6,7 +6,7 @@ from pathlib import Path
 
 import faster_whisper
 
-from ..config import select_backend
+from thesis_demo.config import select_backend
 
 MODEL_NAME = "small"  # faster-whisper model size
 FFMPEG_TIMEOUT_S = 30

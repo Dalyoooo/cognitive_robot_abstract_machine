@@ -81,8 +81,12 @@ class PlanStep:
         self._validate_action()
         self._validate_names()
         spec = ACTION_SPECS[self.action]
-        self._validate_object(spec)
-        self._validate_location(spec)
+        self._validate_required_field(
+            spec, "object", self.object, "an 'object' (the thing to act on)"
+        )
+        self._validate_required_field(
+            spec, "location", self.location, "a 'location' (where to go/place)"
+        )
         self._validate_relation(spec)
         self._validate_source(spec)
 
@@ -137,19 +141,11 @@ class PlanStep:
             if value is not None and (not isinstance(value, str) or not value):
                 raise ValueError(f"{field_name} must be a non-empty string or null")
 
-    def _validate_object(self, spec):
-        if "object" in spec.required_fields and self.object is None:
-            raise ValueError(
-                f"{self.action} requires an 'object' (the thing to act on)"
-            )
-        if "object" not in spec.required_fields and self.object is not None:
-            raise ValueError(f"{self.action} requires 'object' to be null")
-
-    def _validate_location(self, spec):
-        if "location" in spec.required_fields and self.location is None:
-            raise ValueError(f"{self.action} requires a 'location' (where to go/place)")
-        if "location" not in spec.required_fields and self.location is not None:
-            raise ValueError(f"{self.action} requires 'location' to be null")
+    def _validate_required_field(self, spec, field_name, value, hint):
+        if field_name in spec.required_fields and value is None:
+            raise ValueError(f"{self.action} requires {hint}")
+        if field_name not in spec.required_fields and value is not None:
+            raise ValueError(f"{self.action} requires {field_name!r} to be null")
 
     def _validate_relation(self, spec):
         if not spec.relations and self.relation is not None:

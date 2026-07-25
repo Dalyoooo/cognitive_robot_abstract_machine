@@ -367,8 +367,10 @@ class OpeningMechanism:
     connection: ActiveConnection1DOF
 
     def position_fraction(self):
-        lower = self.connection.dof.limits.lower.position
-        upper = self.connection.dof.limits.upper.position
+        # Reading connection.dof copies the degree of freedom, so read it once.
+        limits = self.connection.dof.limits
+        lower = limits.lower.position
+        upper = limits.upper.position
         if lower is None or upper is None or upper <= lower:
             return None
         return (self.connection.position - lower) / (upper - lower)
@@ -395,8 +397,9 @@ def find_opening_mechanism(annotation):
         except ValueError:
             # semDT raises when no movable parent connection leads to the handle.
             continue
-        lower = connection.dof.limits.lower.position
-        upper = connection.dof.limits.upper.position
+        limits = connection.dof.limits
+        lower = limits.lower.position
+        upper = limits.upper.position
         if lower is not None and upper is not None and lower >= upper:
             continue
         return OpeningMechanism(handle.root, connection)

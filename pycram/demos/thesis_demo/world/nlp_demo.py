@@ -1,13 +1,14 @@
 import os
 import time
 import xml.etree.ElementTree as ET
+from collections import Counter
 from itertools import combinations
 
 from pycram.datastructures.dataclasses import Context
 from semantic_digital_twin.adapters.mesh import STLParser
 from semantic_digital_twin.adapters.urdf import URDFParser
 from semantic_digital_twin.datastructures.prefixed_name import PrefixedName
-from semantic_digital_twin.reasoning.predicates import is_supported_by
+from semantic_digital_twin.reasoning.predicates import InsideOf, is_supported_by
 from semantic_digital_twin.reasoning.world_reasoner import WorldReasoner
 from semantic_digital_twin.robots.hsrb import HSRB
 from semantic_digital_twin.robots.pr2 import PR2
@@ -36,10 +37,10 @@ from semantic_digital_twin.world_description.geometry import Color, Scale
 from semantic_digital_twin.world_description.shape_collection import ShapeCollection
 from semantic_digital_twin.world_description.world_entity import Region
 
+from thesis_demo.planner.world_context import CONTAINMENT_THRESHOLD
 from thesis_demo.world.environment import OBJECT_COLORS, OBJECTS_DIR
 from thesis_demo.world.environments import ENVIRONMENTS
 
-# A tiny overlap avoids numerical gaps while keeping objects visually on the surface.
 _SUPPORT_OVERLAP = 0.005
 _GEOMETRY_TOLERANCE = 1e-4
 
@@ -181,7 +182,7 @@ def _surface_pose(world, surface, object_lower_z, offset):
 
     # The region polygon is the actual usable surface; the furniture bbox also
     # covers basins, legs, and frames.
-    lower, upper = _body_bounds_in_frame(world, region, surface.root)
+    lower, upper = _body_bounds_in_frame(region, surface.root)
     local_point = Point3(
         x=float((lower[0] + upper[0]) / 2.0 + offset[0]),
         y=float((lower[1] + upper[1]) / 2.0 + offset[1]),
@@ -273,7 +274,7 @@ def _place_contained_objects(world, placements):
             container.add_object(stored_object)
 
 
-def _body_bounds_in_frame(world, body, frame):
+def _body_bounds_in_frame(body, frame):
     if body.combined_mesh is None:
         raise RuntimeError(f"Body {body.name!s} has no collision geometry")
     shapes = body.area if isinstance(body, Region) else body.collision
@@ -284,8 +285,8 @@ def _body_bounds_in_frame(world, body, frame):
     )
 
 
-def _validate_surface_geometry(world, body, surface):
-    object_lower, object_upper = _body_bounds_in_frame(world, body, surface.root)
+def _validate_surface_geometry(body, surface):
+    object_lower, object_upper = _body_bounds_in_frame(body, surface.root)
     surface_lower, surface_upper = surface.root.combined_mesh.bounds
     for axis in (0, 1):
         if (
@@ -305,25 +306,22 @@ def _validate_surface_geometry(world, body, surface):
         )
 
 
-def _validate_contained_geometry(world, body, container):
+def _validate_contained_geometry(body, container):
     if container.combined_mesh is None:
         raise RuntimeError(f"Container {container.name!s} has no collision geometry")
-    object_lower, object_upper = _body_bounds_in_frame(world, body, container)
-    container_lower, container_upper = container.combined_mesh.bounds
-    for axis in range(3):
-        if (
-            object_lower[axis] < container_lower[axis] - _GEOMETRY_TOLERANCE
-            or object_upper[axis] > container_upper[axis] + _GEOMETRY_TOLERANCE
-        ):
-            raise RuntimeError(
-                f"{body.name!s} lies outside the bounds of {container.name!s}"
-            )
+    # The same predicate the planner uses to decide what counts as being inside.
+    if InsideOf(body, container).compute_containment_ratio() <= CONTAINMENT_THRESHOLD:
+        raise RuntimeError(
+            f"{body.name!s} lies outside the bounds of {container.name!s}"
+        )
 
 
 def _validate_object_separation(world, spec):
+    # Axis-aligned bounds in the world frame. That is conservative for a rotated
+    # object, which is fine because every demo object is an axis-aligned box.
     placements = (*spec.surface_objects, *spec.contained_objects)
     bodies = [world.get_body_by_name(placement.name) for placement in placements]
-    bounds = {body: _body_bounds_in_frame(world, body, world.root) for body in bodies}
+    bounds = {body: _body_bounds_in_frame(body, world.root) for body in bodies}
     for first, second in combinations(bodies, 2):
         first_lower, first_upper = bounds[first]
         second_lower, second_upper = bounds[second]
@@ -353,10 +351,10 @@ def _validate_environment(world, spec):
                 f"named {room_spec.name!r}, found {len(rooms)}"
             )
 
-    root_annotations = {}
-    for annotation in world.get_semantic_annotations_by_type(HasRootBody):
-        key = (type(annotation), annotation.root)
-        root_annotations[key] = root_annotations.get(key, 0) + 1
+    root_annotations = Counter(
+        (type(annotation), annotation.root)
+        for annotation in world.get_semantic_annotations_by_type(HasRootBody)
+    )
     duplicates = [
         (annotation_type.__name__, str(root.name))
         for (annotation_type, root), count in root_annotations.items()
@@ -385,7 +383,7 @@ def _validate_environment(world, spec):
             raise RuntimeError(
                 f"{placement.name!r} is not attached to {placement.surface!r}"
             )
-        _validate_surface_geometry(world, body, surface)
+        _validate_surface_geometry(body, surface)
 
     for placement in spec.contained_objects:
         body = world.get_body_by_name(placement.name)
@@ -405,7 +403,7 @@ def _validate_environment(world, spec):
             raise RuntimeError(
                 f"{placement.name!r} is missing from {placement.container!r}.objects"
             )
-        _validate_contained_geometry(world, body, parent)
+        _validate_contained_geometry(body, parent)
 
     _validate_object_separation(world, spec)
 
@@ -503,14 +501,18 @@ def start_visualization(world):
 
 
 def build_world(robot_name="hsrb", environment="apartment", *, visualize=True):
-    """Build the Binder demo and optionally start its ROS visualization node."""
+    """Build the Binder demo and optionally start its ROS visualization node.
+
+    The context carries the world and the robot, so it is the only handle a
+    caller needs.
+    """
     world, robot, context = build_world_model(robot_name, environment)
     node = start_visualization(world) if visualize else None
-    return world, robot, context, node
+    return context, node
 
 
 if __name__ == "__main__":
     import rclpy
 
-    world, robot, context, node = build_world()
+    _context, node = build_world()
     rclpy.spin(node)

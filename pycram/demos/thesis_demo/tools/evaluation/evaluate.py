@@ -30,6 +30,25 @@ from thesis_demo.tools.evaluation.scoring import (
     load_cases,
 )
 
+CASE_CSV_COLUMNS = (
+    "id",
+    "model_variant",
+    "evaluation_mode",
+    "expected_outcome",
+    "planner_outcome",
+    "planning_success",
+    "reachability_success",
+    "execution_success",
+    "task_success",
+    "execution_status",
+    "timed_out",
+    "failure_stage",
+    "error",
+    "planning_latency_s",
+    "execution_latency_s",
+    "total_latency_s",
+)
+
 
 @dataclass(frozen=True)
 class ModelSpecification:
@@ -64,28 +83,7 @@ class ResultWriter:
 
     def write_case_results(self, results):
         rows = [
-            {
-                "id": result.case.id,
-                "model_variant": (
-                    result.model_variant.value
-                    if result.model_variant is not None
-                    else None
-                ),
-                "evaluation_mode": result.evaluation_mode.value,
-                "expected_outcome": result.case.expected_outcome,
-                "planner_outcome": result.planner_outcome,
-                "planning_success": result.planning_success,
-                "grounding_success": result.grounding_success,
-                "execution_success": result.execution_success,
-                "task_success": result.task_success,
-                "execution_status": result.execution_status,
-                "timed_out": result.timed_out,
-                "failure_stage": result.failure_stage,
-                "error": result.error,
-                "planning_latency_s": result.planning_latency_s,
-                "execution_latency_s": result.execution_latency_s,
-                "total_latency_s": result.total_latency_s,
-            }
+            {column: result.to_record()[column] for column in CASE_CSV_COLUMNS}
             for result in results
         ]
         self._write_csv(self.case_results_path, rows)
@@ -406,7 +404,6 @@ def main():
         )
         raise
 
-    summary_path = writer.summary_path
     summaries = {
         variant.value: asdict(
             LiveSummary.from_results(
@@ -418,7 +415,7 @@ def main():
     log_event(logger, "run_end", {"summaries": summaries})
     print(
         f"Wrote {writer.results_path}, {writer.case_results_path}, "
-        f"{summary_path}, and evaluation.log"
+        f"{writer.summary_path}, and evaluation.log"
     )
     return 0
 

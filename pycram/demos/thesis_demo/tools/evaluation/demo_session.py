@@ -3,8 +3,7 @@ from dataclasses import dataclass, field
 
 from pycram.datastructures.dataclasses import Context
 
-from thesis_demo.execution.execution import run_plan
-from thesis_demo.execution.grounding import GroundingError
+from thesis_demo.execution.execution import run_plan_as_result
 from thesis_demo.planner.world_context import PlannerNames, build_world_context
 from thesis_demo.world.nlp_demo import start_visualization, build_world_model
 
@@ -55,38 +54,12 @@ class DemoSession:
         return build_world_context(self.world, self.robot, self.names)
 
     def execute_plan(self, plan_dict, step_callback=None):
-        steps = plan_dict.get("plan", [])
-        try:
-            observations = run_plan(
-                self.world,
-                self.robot,
-                self.demo_context,
-                steps,
-                step_callback=step_callback,
-                names=self.names,
-            )
-        except TimeoutError:
-            raise
-        except GroundingError as error:
-            self.result = {
-                "status": "error",
-                "phase": "grounding",
-                "error": str(error),
-                "grounding_error": error.to_dict(),
-            }
-        except Exception as error:
-            self.result = {
-                "status": "error",
-                "phase": "execution",
-                "error": f"{type(error).__name__}: {error}",
-                "error_type": type(error).__name__,
-            }
-        else:
-            self.result = {
-                "status": "ok",
-                "phase": "execution",
-                "observations": observations,
-            }
+        self.result = run_plan_as_result(
+            self.demo_context,
+            plan_dict.get("plan", []),
+            step_callback=step_callback,
+            names=self.names,
+        )
 
     def execution_result(self):
         return self.result

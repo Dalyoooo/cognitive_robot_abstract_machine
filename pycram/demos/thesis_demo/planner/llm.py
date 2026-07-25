@@ -11,7 +11,7 @@ from llama_cpp import Llama
 
 from thesis_demo.config import select_backend
 from thesis_demo.planner.prompt import system_prompt, user_instruction, user_turn
-from thesis_demo.validation.guard import verify
+from thesis_demo.validation.guard import GuardReport, inspect as inspect_plan
 from thesis_demo.validation.schema import parse_clarification, parse_plan
 
 MAX_NEW_TOKENS = 2048
@@ -44,6 +44,9 @@ class PlannerMetrics:
     guard_valid: bool
     rejection_reason: str | None
     raw_response: str
+    # None when the check never ran: a clarification has no plan to inspect.
+    names_valid: bool | None = None
+    sequence_valid: bool | None = None
     attempts: int = 1
     attempt_reasons: list = field(default_factory=list)
 
@@ -136,9 +139,7 @@ def plan(
     context=None,
     inference=None,
 ):
-    messages = (conversation or []) + [{"role": "user", "content": transcript}]
-    events = _run_loop(messages, context or {}, inference)
-    for event in events:
+    for event in plan_stream(transcript, conversation, context, inference):
         if event["type"] == "done":
             return PlannerResult(
                 outcome=event["outcome"],
@@ -202,8 +203,8 @@ def _correction_message(rejection_reason):
 
 def _assess_response(parsed_response, context):
     if parsed_response is None:
-        return False, "Output must be exactly one JSON object."
-    return verify(parsed_response, context)
+        return GuardReport(False, "Output must be exactly one JSON object.")
+    return inspect_plan(parsed_response, context)
 
 
 def _run_loop(messages, context, inference=None):
@@ -227,7 +228,8 @@ def _run_loop(messages, context, inference=None):
             yield {"type": "token", "text": delta}
 
         parsed_response = _parse_json_response(raw_response)
-        is_valid, rejection_reason = _assess_response(parsed_response, context)
+        guard_report = _assess_response(parsed_response, context)
+        is_valid, rejection_reason = guard_report.is_valid, guard_report.message
 
         if is_valid:
             if "clarification" in parsed_response:
@@ -263,6 +265,8 @@ def _run_loop(messages, context, inference=None):
         json_valid=isinstance(parsed_response, dict),
         schema_valid=schema_valid,
         guard_valid=response_is_valid,
+        names_valid=guard_report.names_valid,
+        sequence_valid=guard_report.sequence_valid,
         rejection_reason=None if response_is_valid else payload_or_reason,
         raw_response=raw_response,
         attempts=attempts,

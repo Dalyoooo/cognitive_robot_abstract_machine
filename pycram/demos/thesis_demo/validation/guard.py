@@ -20,20 +20,50 @@ class ContextNames:
     places: set
     sources: set
 
-def verify(response, context=None):
+
+@dataclass(frozen=True)
+class GuardReport:
+    """Why a response was accepted or rejected, split by the check that decided.
+
+    ``names_valid`` and ``sequence_valid`` are None when the check never ran:
+    a clarification has no plan to inspect, and a response that fails the
+    schema never reaches them.
+    """
+
+    is_valid: bool
+    message: str
+    names_valid: bool = None
+    sequence_valid: bool = None
+
+
+def inspect(response, context=None):
     try:
         if isinstance(response, dict) and set(response) == {"clarification"}:
             parse_clarification(response)
-            return True, "ok"
+            return GuardReport(True, "ok")
         steps = parse_plan(response)
     except (KeyError, TypeError, ValueError) as error:
-        return False, str(error)
+        return GuardReport(False, str(error))
 
+    # Both checks always run so each can be reported on its own, even though
+    # only the first failure is worth telling the planner about.
+    names_valid, names_message = (True, "ok")
     if context:
-        is_valid, message = check_names(steps, context)
-        if not is_valid:
-            return False, message
-    return check_sequence(steps, context)
+        names_valid, names_message = check_names(steps, context)
+    sequence_valid, sequence_message = check_sequence(steps, context)
+
+    message = names_message if not names_valid else sequence_message
+    return GuardReport(
+        is_valid=names_valid and sequence_valid,
+        message=message,
+        names_valid=names_valid,
+        sequence_valid=sequence_valid,
+    )
+
+
+def verify(response, context=None):
+    report = inspect(response, context)
+    return report.is_valid, report.message
 
 
 def check_names(steps, context):

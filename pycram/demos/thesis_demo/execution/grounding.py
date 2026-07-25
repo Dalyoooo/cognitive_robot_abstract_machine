@@ -92,12 +92,13 @@ class Grounding:
     # ----- Entity lookup -----
 
     def resolve_annotation(self, label):
-        body = self.bodies_by_name.get(label.strip())
+        annotation_label = label.strip()
+        body = self.bodies_by_name.get(annotation_label)
         if body is not None:
             annotations = self._annotations_for(body)
             if annotations:
                 return most_specific_annotation(annotations)
-        return self.rooms_by_name.get(label.strip())
+        return self.rooms_by_name.get(annotation_label)
 
     def resolve_body(self, label, source=None):
         body_label = label.strip()
@@ -142,7 +143,7 @@ class Grounding:
     def _require_root_annotation(self, object_body, object_label):
         annotation = self._find_annotation(object_body, HasRootBody)
         if annotation is None:
-            raise RuntimeError(f"No storage annotation found for {object_label!r}")
+            raise RuntimeError(f"No annotation found for the body of {object_label!r}")
         return annotation
 
     def _annotations_for(self, body):
@@ -165,9 +166,6 @@ class Grounding:
             body = self.resolve_body(label)
         body_pose = body.global_pose
         return self._world_pose(float(body_pose.x), float(body_pose.y), 0.0)
-
-    def placement_pose(self, target_label, object_body, relation=None):
-        return self.placement_poses(target_label, object_body, relation)[0]
 
     def placement_poses(self, target_label, object_body, relation=None):
         if relation in DIRECTIONAL_RELATIONS:
@@ -194,7 +192,10 @@ class Grounding:
             raise GroundingError(
                 f"no free placement point on {str(surface.root.name)!r}"
             )
-        return [self._pose_at(point) for point in points]
+        return [
+            self._world_pose(float(point.x), float(point.y), float(point.z))
+            for point in points
+        ]
 
     def directional_placement_pose(self, reference_label, object_body, relation):
         if self.robot is None:
@@ -232,7 +233,7 @@ class Grounding:
                 + (float(candidate.y) - reference_y) ** 2
             ),
         )
-        return self._pose_at(point)
+        return self._world_pose(float(point.x), float(point.y), float(point.z))
 
     def _inside_placement_pose(self, container_body, object_body):
         # just placing in the middle for the demo
@@ -254,9 +255,6 @@ class Grounding:
         )
         return [self.world.transform(point, self.world.root) for point in points]
 
-    def _pose_at(self, point):
-        return self._world_pose(float(point.x), float(point.y), float(point.z))
-
     def _world_pose(self, x, y, z):
         return Pose.from_xyz_rpy(
             x=x,
@@ -274,13 +272,12 @@ class Grounding:
             object_label,
         )
         storage = self._resolve_storage(target_label, relation)
-        self._validate_storage_relation(
-            object_body,
-            storage,
-            object_label,
-            target_label,
-            relation,
-        )
+        if relation in INSIDE_RELATIONS and not is_inside_or_attached(
+            object_body, storage.root
+        ):
+            raise self._unsatisfied_relation_error(
+                object_label, target_label, relation
+            )
 
         with self.world.modify_world():
             self._remove_from_all_storage(object_annotation)
@@ -317,24 +314,6 @@ class Grounding:
             raise RuntimeError(f"No storage space found for {target_label!r}")
         return storage
 
-    def _validate_storage_relation(
-        self,
-        object_body,
-        storage,
-        object_label,
-        target_label,
-        relation,
-    ):
-        if relation not in INSIDE_RELATIONS:
-            return
-        if is_inside_or_attached(object_body, storage.root):
-            return
-        raise self._unsatisfied_relation_error(
-            object_label,
-            target_label,
-            relation,
-        )
-
     def _add_to_storage(
         self,
         object_annotation,
@@ -359,8 +338,7 @@ class Grounding:
                 target_label,
                 relation,
             )
-        if object_annotation not in storage.objects:
-            storage.add_object(object_annotation)
+        storage.add_object(object_annotation)
 
     @staticmethod
     def _unsatisfied_relation_error(object_label, target_label, relation):

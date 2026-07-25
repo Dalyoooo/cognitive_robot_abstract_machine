@@ -275,9 +275,7 @@ class Grounding:
         if relation in INSIDE_RELATIONS and not is_inside_or_attached(
             object_body, storage.root
         ):
-            raise self._unsatisfied_relation_error(
-                object_label, target_label, relation
-            )
+            raise self._unsatisfied_relation_error(object_label, target_label, relation)
 
         with self.world.modify_world():
             self._remove_from_all_storage(object_annotation)

@@ -55,9 +55,21 @@ class CaseDeadline:
             signal.setitimer(signal.ITIMER_REAL, self.seconds)
 
     def _expire(self, _signal_number, _frame):
-        raise CaseTimeoutError(
-            f"case made no progress for {self.seconds:g} seconds"
-        )
+        raise CaseTimeoutError(f"case made no progress for {self.seconds:g} seconds")
+
+
+@dataclass(eq=False)
+class _ActionProgressHandler(logging.Handler):
+    callback: object
+
+    def __post_init__(self):
+        logging.Handler.__init__(self)
+
+    def emit(self, record):
+        prefix = "Performing action "
+        message = record.getMessage()
+        if message.startswith(prefix):
+            self.callback(message.removeprefix(prefix))
 
 
 def create_log(path):
@@ -106,6 +118,8 @@ def _empty_metrics():
         "schema_valid": None,
         "guard_valid": None,
         "plan_valid": None,
+        "attempts": None,
+        "first_attempt_accepted": None,
         "outcome_match": None,
         "reference_goal_match": None,
         "postcondition_success": None,
@@ -317,8 +331,6 @@ def _physical_check_name(check):
 def physical_goal_metrics(case, observations):
     expected_checks = expected_physical_checks(case)
     checks = GoalChecks(count=len(expected_checks))
-    if not expected_checks:
-        return checks.as_metrics("physical_goal_")
 
     observations = observations if isinstance(observations, dict) else {}
     for check in expected_checks:
@@ -330,7 +342,18 @@ def physical_goal_metrics(case, observations):
         error = None if result else f"physical goal failed: {check_name}"
         checks.record_checked(error)
 
-    checks.success = bool(checks.checked_count == checks.count and not checks.errors)
+    # pyCRAM's own post-conditions, evaluated by the executor at action time.
+    # They are extra evidence of failure, not additional expected goals.
+    for step_observation in observations.get("steps", []):
+        if step_observation.get("condition_ok") is False:
+            object_name = step_observation.get("object")
+            target = f"({object_name})" if object_name else ""
+            checks.errors.append(
+                f"post-condition failed after {step_observation['action']}{target}"
+            )
+
+    if checks.checked_count or checks.errors:
+        checks.success = checks.checked_count == checks.count and not checks.errors
     return checks.as_metrics("physical_goal_")
 
 
@@ -480,8 +503,25 @@ def _execute_plan(case, session, payload, logger, deadline):
             action=step.get("action"),
         )
 
+    def action_started(action):
+        deadline.reset()
+        _trace(
+            logger,
+            "execution_action_started",
+            case,
+            "execution",
+            action=action,
+        )
+
     deadline.reset()
-    session.execute_plan(payload, step_callback=step_completed)
+    action_logger = logging.getLogger("pycram.robot_plans.actions.base")
+    # pyCRAM has no callback for nested actions, so its action log marks progress.
+    progress_handler = _ActionProgressHandler(action_started)
+    action_logger.addHandler(progress_handler)
+    try:
+        session.execute_plan(payload, step_callback=step_completed)
+    finally:
+        action_logger.removeHandler(progress_handler)
     result = session.execution_result()
     if not isinstance(result, dict) or "status" not in result:
         raise RuntimeError("synchronous execution returned no status")
@@ -565,10 +605,6 @@ class _CaseStage:
         return time.perf_counter() - self.started
 
 
-def world_context(session):
-    return session.context()
-
-
 def _wait_for_world(delay_s):
     if delay_s <= 0:
         return
@@ -579,7 +615,7 @@ def _wait_for_world(delay_s):
 def _setup_world(case, session, configuration, logger):
     session.setup_world(case.robot, case.environment)
     _wait_for_world(configuration.world_settle_delay_s)
-    context = world_context(session)
+    context = session.context()
     if case.environment == "kitchen":
         validate_entities(case, context, "live Kitchen")
     _trace(
@@ -595,7 +631,7 @@ def _setup_world(case, session, configuration, logger):
 
 def _verify_goals(result, case, session, executor_result, logger):
     metrics = result.metrics
-    postconditions = postcondition_metrics(case, world_context(session))
+    postconditions = postcondition_metrics(case, session.context())
     physical_goals = physical_goal_metrics(case, executor_result.get("observations"))
     goals = combined_goal_metrics(case, postconditions, physical_goals)
     metrics.update(postconditions)
@@ -635,6 +671,8 @@ def _plan_turns(result, case, planner, context, logger, inference):
     )
     result.planner_outcome = outcome
     result.planning_latency_s += latency
+    metrics["attempts"] = metadata.get("attempts", 1)
+    metrics["first_attempt_accepted"] = not metadata.get("attempt_reasons")
     if metadata.get("raw_response") is not None:
         result.raw_responses.append(metadata["raw_response"])
     quality, error = _assess_planner_response(case, outcome, payload, context, metadata)
@@ -647,6 +685,7 @@ def _plan_turns(result, case, planner, context, logger, inference):
         outcome=outcome,
         success=error is None,
         latency_s=latency,
+        attempts=metrics["attempts"],
     )
 
     asked = outcome == "clarification"
@@ -864,7 +903,7 @@ def validate_demo_world(cases, session, world_settle_delay_s=0.0):
     try:
         session.setup_world("hsrb", "kitchen")
         _wait_for_world(world_settle_delay_s)
-        context = world_context(session)
+        context = session.context()
         validate_kitchen_inventory(context, cases, "live Kitchen")
         for case in cases:
             validate_entities(case, context, "live Kitchen")

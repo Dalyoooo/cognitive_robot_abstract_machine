@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 
 CONTEXT_KEYS = (
@@ -12,48 +12,57 @@ CONTEXT_KEYS = (
     "types",
 )
 
-VALID_PYCRAM_ACTIONS = frozenset(
-    {
-        "NavigateAction",
-        "PickUpAction",
-        "PlaceAction",
-        "TransportAction",
-        "OpenAction",
-        "CloseAction",
-        "ParkArmsAction",
-    }
-)
-
 DIRECTIONAL_RELATIONS = ("left_of", "right_of", "in_front_of", "behind")
 INSIDE_RELATIONS = ("inside",)
-PLAN_STEP_FIELDS = frozenset({"action", "object", "location", "relation", "source"})
+PLAN_STEP_FIELDS = {"action", "object", "location", "relation", "source"}
 
-NEEDS_OBJECT = frozenset(
+
+@dataclass(frozen=True)
+class ActionSpec:
+    required_fields: set = field(default_factory=set)
+    optional_fields: set = field(default_factory=set)
+    relations: set = field(default_factory=set)
+
+
+ACTION_SPECS = MappingProxyType(
     {
-        "PickUpAction",
-        "PlaceAction",
-        "TransportAction",
-        "OpenAction",
-        "CloseAction",
+        "TransportAction": ActionSpec(
+            required_fields={"object", "location", "relation"},
+            optional_fields={"source"},
+            relations={"on", "inside", *DIRECTIONAL_RELATIONS},
+        ),
+        "PickUpAction": ActionSpec(
+            required_fields={"object"},
+            optional_fields={"source"},
+        ),
+        "PlaceAction": ActionSpec(
+            required_fields={"object", "location", "relation"},
+            relations={"on", "inside", *DIRECTIONAL_RELATIONS},
+        ),
+        "NavigateAction": ActionSpec(
+            required_fields={"location"},
+        ),
+        "OpenAction": ActionSpec(
+            required_fields={"object"},
+        ),
+        "CloseAction": ActionSpec(
+            required_fields={"object"},
+        ),
+        "ParkArmsAction": ActionSpec(),
     }
 )
 
-NEEDS_LOCATION = frozenset(
-    {
-        "NavigateAction",
-        "PlaceAction",
-        "TransportAction",
-    }
-)
+VALID_PYCRAM_ACTIONS = set(ACTION_SPECS)
 
-RELATIONS_BY_ACTION = MappingProxyType(
-    {
-        "PlaceAction": frozenset({"on", "inside", *DIRECTIONAL_RELATIONS}),
-        "TransportAction": frozenset({"on", "inside", *DIRECTIONAL_RELATIONS}),
-    }
-)
-SOURCE_ACTIONS = frozenset({"PickUpAction", "TransportAction"})
-DESTINATION_ACTIONS = frozenset({"PlaceAction", "TransportAction"})
+SOURCE_ACTIONS = {
+    name for name, spec in ACTION_SPECS.items() if "source" in spec.optional_fields
+}
+
+DESTINATION_ACTIONS = {
+    name
+    for name, spec in ACTION_SPECS.items()
+    if {"object", "location"} <= spec.required_fields
+}
 
 
 def format_choices(values):
@@ -71,10 +80,11 @@ class PlanStep:
     def validate(self):
         self._validate_action()
         self._validate_names()
-        self._validate_object()
-        self._validate_location()
-        self._validate_relation()
-        self._validate_source()
+        spec = ACTION_SPECS[self.action]
+        self._validate_object(spec)
+        self._validate_location(spec)
+        self._validate_relation(spec)
+        self._validate_source(spec)
 
     def as_dict(self):
         return {
@@ -127,32 +137,31 @@ class PlanStep:
             if value is not None and (not isinstance(value, str) or not value):
                 raise ValueError(f"{field_name} must be a non-empty string or null")
 
-    def _validate_object(self):
-        if self.action in NEEDS_OBJECT and self.object is None:
+    def _validate_object(self, spec):
+        if "object" in spec.required_fields and self.object is None:
             raise ValueError(
                 f"{self.action} requires an 'object' (the thing to act on)"
             )
-        if self.action not in NEEDS_OBJECT and self.object is not None:
+        if "object" not in spec.required_fields and self.object is not None:
             raise ValueError(f"{self.action} requires 'object' to be null")
 
-    def _validate_location(self):
-        if self.action in NEEDS_LOCATION and self.location is None:
+    def _validate_location(self, spec):
+        if "location" in spec.required_fields and self.location is None:
             raise ValueError(f"{self.action} requires a 'location' (where to go/place)")
-        if self.action not in NEEDS_LOCATION and self.location is not None:
+        if "location" not in spec.required_fields and self.location is not None:
             raise ValueError(f"{self.action} requires 'location' to be null")
 
-    def _validate_relation(self):
-        allowed_relations = RELATIONS_BY_ACTION.get(self.action)
-        if allowed_relations is None and self.relation is not None:
+    def _validate_relation(self, spec):
+        if not spec.relations and self.relation is not None:
             raise ValueError(f"{self.action} requires 'relation' to be null")
-        if allowed_relations is not None and self.relation not in allowed_relations:
+        if spec.relations and self.relation not in spec.relations:
             raise ValueError(
                 f"{self.action} relation must be one of: "
-                f"{format_choices(allowed_relations)}"
+                f"{format_choices(spec.relations)}"
             )
 
-    def _validate_source(self):
-        if self.action not in SOURCE_ACTIONS and self.source is not None:
+    def _validate_source(self, spec):
+        if "source" not in spec.optional_fields and self.source is not None:
             raise ValueError(f"{self.action} requires 'source' to be null")
 
 

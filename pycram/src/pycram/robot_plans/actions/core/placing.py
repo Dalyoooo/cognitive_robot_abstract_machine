@@ -127,7 +127,7 @@ class PlaceAction(ActionDescription):
             is_body_in_gripper(kwargs["object_designator"], end_effector) < 0.1,
             allclose(
                 kwargs["object_designator"].global_pose,
-                kwargs["target_location"].to_spatial_type(),
+                kwargs["target_location"],
                 atol=0.03,
             ),
         )

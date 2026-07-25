@@ -11,7 +11,7 @@ from thesis_demo.validation.schema import (
 )
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True)
 class ContextNames:
     objects: set
     surfaces: set
@@ -19,27 +19,6 @@ class ContextNames:
     openables: set
     places: set
     sources: set
-
-    def __iter__(self):
-        return iter(self._values())
-
-    def __eq__(self, other):
-        if isinstance(other, ContextNames):
-            return self._values() == other._values()
-        if isinstance(other, tuple):
-            return self._values() == other
-        return NotImplemented
-
-    def _values(self):
-        return (
-            self.objects,
-            self.surfaces,
-            self.containers,
-            self.openables,
-            self.places,
-            self.sources,
-        )
-
 
 def verify(response, context=None):
     try:
@@ -67,10 +46,9 @@ def check_names(steps, context):
 
 
 def check_sequence(steps, context=None):
-    plan = {"plan": [step.as_dict() for step in steps]}
     validator = _SequenceValidator(
         context=context or {},
-        required_containers=required_open_containers(plan, context),
+        required_containers=required_open_containers(steps, context),
     )
     return validator.validate(steps)
 
@@ -120,24 +98,19 @@ def allowed_locations_for(action, relation, names):
     return set()
 
 
-def required_open_containers(plan, context):
+def required_open_containers(steps, context):
     openables = openable_names(context)
     return {
         container
-        for step in plan.get("plan", [])
-        if isinstance(step, dict)
+        for step in steps
         for container in openables
         if accesses_container(step, container)
     }
 
 
 def accesses_container(step, container):
-    return step.get("source") == container or is_inside_destination(step, container)
-
-
-def is_inside_destination(step, container):
-    return (
-        step.get("location") == container and step.get("relation") in INSIDE_RELATIONS
+    return step.source == container or (
+        step.location == container and step.relation in INSIDE_RELATIONS
     )
 
 

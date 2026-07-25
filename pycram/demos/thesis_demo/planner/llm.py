@@ -15,7 +15,7 @@ from thesis_demo.validation.guard import verify
 from thesis_demo.validation.schema import parse_clarification, parse_plan
 
 MAX_NEW_TOKENS = 2048
-N_CTX = 8192
+N_CTX = 16384  # context window
 
 
 @dataclass(frozen=True)
@@ -24,6 +24,11 @@ class InferenceConfiguration:
     temperature: float = 0.0
     max_tokens: int = MAX_NEW_TOKENS
     base_seed: int | None = None
+    max_attempts: int = 1
+
+    def __post_init__(self):
+        if self.max_attempts < 1:
+            raise ValueError("max_attempts must be at least 1")
 
     def for_case(self, case_identifier):
         base_seed = self.seed if self.base_seed is None else self.base_seed
@@ -39,6 +44,8 @@ class PlannerMetrics:
     guard_valid: bool
     rejection_reason: str | None
     raw_response: str
+    attempts: int = 1
+    attempt_reasons: list = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -82,10 +89,7 @@ def setup_planner(
 def load_planner():
     gguf_model = os.environ.get("PLANNER_GGUF_MODEL", "wijan/action-planner-gguf")
     gguf_file = os.environ.get("PLANNER_GGUF_FILE", "qwen2.5-3b-instruct.Q4_K_M.gguf")
-    try:
-        setup_planner(gguf_model, gguf_file)
-    except (ImportError, RuntimeError, OSError) as exc:
-        print(f"[planner] could not load model: {exc!r}", flush=True)
+    setup_planner(gguf_model, gguf_file)
 
 
 def _resolve_gguf_path(model, gguf_file):
@@ -133,11 +137,7 @@ def plan(
     inference=None,
 ):
     messages = (conversation or []) + [{"role": "user", "content": transcript}]
-    events = (
-        _run_loop(messages, context or {})
-        if inference is None
-        else _run_loop(messages, context or {}, inference)
-    )
+    events = _run_loop(messages, context or {}, inference)
     for event in events:
         if event["type"] == "done":
             return PlannerResult(
@@ -150,28 +150,15 @@ def plan(
 
 def plan_stream(transcript, conversation=None, context=None, inference=None):
     messages = (conversation or []) + [{"role": "user", "content": transcript}]
-    if inference is None:
-        return _run_loop(messages, context or {})
     return _run_loop(messages, context or {}, inference)
 
 
-def _parse_json_response_with_mode(text):
+def _parse_json_response(text):
+    # Anything but exactly one JSON object is a validation failure.
     try:
-        return json.loads(text.strip()), "exact"
+        return json.loads(text.strip())
     except json.JSONDecodeError:
-        pass
-
-    decoder = json.JSONDecoder()
-    for start, character in enumerate(text):
-        if character != "{":
-            continue
-        try:
-            value, _ = decoder.raw_decode(text[start:])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(value, dict):
-            return value, "embedded_json"
-    return None, "invalid"
+        return None
 
 
 def _generate_response(messages, inference=None):
@@ -204,35 +191,62 @@ def _prepare_messages(messages, context):
     return [system] + model_messages, history_messages
 
 
+def _correction_message(rejection_reason):
+    return (
+        f"Your answer was rejected: {rejection_reason}\n"
+        "Please answer again with exactly one JSON object and try to fix this problem. "
+        "Use the given world-context and use this as the only source of truth. "
+        "No explanation, no apology, no Markdown."
+    )
+
+
+def _assess_response(parsed_response, context):
+    if parsed_response is None:
+        return False, "Output must be exactly one JSON object."
+    return verify(parsed_response, context)
+
+
 def _run_loop(messages, context, inference=None):
     if _state.llm is None:
         raise RuntimeError("Planner not initialized. Call setup_planner() first.")
 
+    inference = inference or _state.inference
     model_messages, history_messages = _prepare_messages(messages, context)
 
+    attempt_reasons = []
     raw_response = ""
-    response = (
-        _generate_response(model_messages)
-        if inference is None
-        else _generate_response(model_messages, inference)
-    )
-    for delta in response:
-        raw_response += delta
-        yield {"type": "token", "text": delta}
+    outcome, payload_or_reason = None, None
+    parsed_response = None
+    attempts = 0
 
-    parsed_response, parse_mode = _parse_json_response_with_mode(raw_response)
+    for attempt in range(1, inference.max_attempts + 1):
+        attempts = attempt
+        raw_response = ""
+        for delta in _generate_response(model_messages, inference):
+            raw_response += delta
+            yield {"type": "token", "text": delta}
 
-    if parsed_response is None:
-        outcome, payload_or_reason = None, "Output must be exactly one JSON object."
-    else:
-        is_valid, rejection_reason = verify(parsed_response, context)
-        if not is_valid:
-            outcome, payload_or_reason = None, rejection_reason
-        elif "clarification" in parsed_response:
-            outcome = "clarification"
-            payload_or_reason = parsed_response["clarification"]
-        else:
-            outcome, payload_or_reason = "plan", parsed_response
+        parsed_response = _parse_json_response(raw_response)
+        is_valid, rejection_reason = _assess_response(parsed_response, context)
+
+        if is_valid:
+            if "clarification" in parsed_response:
+                outcome = "clarification"
+                payload_or_reason = parsed_response["clarification"]
+            else:
+                outcome = "plan"
+                payload_or_reason = parsed_response
+            break
+
+        attempt_reasons.append(rejection_reason)
+        if attempt < inference.max_attempts:
+            model_messages = model_messages + [
+                {"role": "assistant", "content": raw_response},
+                {"role": "user", "content": _correction_message(rejection_reason)},
+            ]
+
+    if outcome is None:
+        payload_or_reason = attempt_reasons[-1]
 
     schema_valid = isinstance(parsed_response, dict)
     if schema_valid:
@@ -246,11 +260,13 @@ def _run_loop(messages, context, inference=None):
 
     response_is_valid = outcome is not None
     metrics = PlannerMetrics(
-        json_valid=parse_mode == "exact" and isinstance(parsed_response, dict),
+        json_valid=isinstance(parsed_response, dict),
         schema_valid=schema_valid,
         guard_valid=response_is_valid,
         rejection_reason=None if response_is_valid else payload_or_reason,
         raw_response=raw_response,
+        attempts=attempts,
+        attempt_reasons=attempt_reasons,
     )
 
     history = history_messages

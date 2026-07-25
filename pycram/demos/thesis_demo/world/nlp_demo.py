@@ -3,12 +3,6 @@ import time
 import xml.etree.ElementTree as ET
 from itertools import combinations
 
-from .nlp_demo_config import (
-    ENVIRONMENTS,
-    OBJECT_COLORS,
-    OBJECTS_DIR,
-    SURFACE_ANNOTATION_TYPES,
-)
 from pycram.datastructures.dataclasses import Context
 from semantic_digital_twin.adapters.mesh import STLParser
 from semantic_digital_twin.adapters.urdf import URDFParser
@@ -34,19 +28,16 @@ from semantic_digital_twin.spatial_types.spatial_types import (
     HomogeneousTransformationMatrix,
     Point3,
 )
-from semantic_digital_twin.world import World
 from semantic_digital_twin.world_description.connections import (
     DifferentialDrive,
-    FixedConnection,
     OmniDrive,
 )
 from semantic_digital_twin.world_description.geometry import Color, Scale
-from semantic_digital_twin.world_description.shape_collection import (
-    BoundingBoxCollection,
-    ShapeCollection,
-)
-from semantic_digital_twin.world_description.world_entity import Body
+from semantic_digital_twin.world_description.shape_collection import ShapeCollection
+from semantic_digital_twin.world_description.world_entity import Region
 
+from thesis_demo.world.environment import OBJECT_COLORS, OBJECTS_DIR
+from thesis_demo.world.environments import ENVIRONMENTS
 
 # A tiny overlap avoids numerical gaps while keeping objects visually on the surface.
 _SUPPORT_OVERLAP = 0.005
@@ -126,7 +117,7 @@ def _require_door(declared, annotation):
 
 
 def _ensure_supporting_region(declared, annotation, world):
-    if type(annotation) not in SURFACE_ANNOTATION_TYPES:
+    if not isinstance(annotation, HasSupportingSurface):
         return
     if annotation.supporting_surface is not None:
         return
@@ -138,33 +129,12 @@ def _ensure_supporting_region(declared, annotation, world):
         )
 
 
-def _primitive(name, scale):
-    body = Body(name=PrefixedName(name))
-    shapes = BoundingBoxCollection.from_event(
-        body, scale.to_simple_event().as_composite_set()
-    ).as_shapes()
-    body.collision = shapes
-    body.visual = shapes
-    subworld = World()
-    with subworld.modify_world():
-        subworld.add_kinematic_structure_entity(body)
-    return subworld
-
-
-def _object_world(placement):
-    if (placement.mesh is None) == (placement.scale is None):
-        raise ValueError(f"{placement.name!r} must define exactly one of mesh or scale")
-    if placement.mesh is not None:
-        return STLParser(os.path.join(OBJECTS_DIR, placement.mesh)).parse()
-    return _primitive(placement.name, Scale(*placement.scale))
-
-
 def _apply_color(body, annotation_type):
     rgb = OBJECT_COLORS.get(annotation_type.__name__)
     if rgb is None:
         return
     color = Color(*rgb, 1.0)
-    for shape in getattr(body.visual, "shapes", []):
+    for shape in body.visual.shapes:
         shape.color = color
 
 
@@ -188,21 +158,14 @@ def get_annotation(world, body_name, annotation_type, *, usable_surface=False):
 
 def _add_room(world, spec):
     width, depth = spec.size
-    half_width, half_depth = width / 2.0, depth / 2.0
-    floor_polytope = [
-        Point3(-half_width, -half_depth, 0.0),
-        Point3(-half_width, half_depth, 0.0),
-        Point3(half_width, half_depth, 0.0),
-        Point3(half_width, -half_depth, 0.0),
-    ]
     with world.modify_world():
-        floor = Floor.create_with_new_body_from_polytope_in_world(
+        floor = Floor.create_with_new_body_in_world(
             name=PrefixedName(f"{spec.name}_floor"),
             world=world,
-            floor_polytope=floor_polytope,
             world_root_T_self=HomogeneousTransformationMatrix.from_xyz_rpy(
                 *spec.center
             ),
+            scale=Scale(width, depth, 0.0),
         )
         # The room floor is semantic only. The URDF already has collision floors.
         floor.root.collision = ShapeCollection([])
@@ -211,22 +174,18 @@ def _add_room(world, spec):
         )
 
 
-def _surface_pose(world, surface, object_body, offset):
+def _surface_pose(world, surface, object_lower_z, offset):
     region = surface.supporting_surface
     if region is None or region.combined_mesh is None:
         raise RuntimeError(f"Surface {surface.root.name!s} has no supporting region")
-    if surface.root.combined_mesh is None:
-        raise RuntimeError(f"Surface {surface.root.name!s} has no geometry")
-    if object_body.combined_mesh is None:
-        raise RuntimeError(f"Object {object_body.name!s} has no geometry")
 
-    # Use collision bounds because URDF geometry can be offset from its link frame.
-    lower, upper = surface.root.combined_mesh.bounds
-    object_lower = object_body.combined_mesh.bounds[0]
+    # The region polygon is the actual usable surface; the furniture bbox also
+    # covers basins, legs, and frames.
+    lower, upper = _body_bounds_in_frame(world, region, surface.root)
     local_point = Point3(
         x=float((lower[0] + upper[0]) / 2.0 + offset[0]),
         y=float((lower[1] + upper[1]) / 2.0 + offset[1]),
-        z=float(upper[2] - object_lower[2] - _SUPPORT_OVERLAP),
+        z=float(upper[2] - object_lower_z - _SUPPORT_OVERLAP),
         reference_frame=surface.root,
     )
     world_point = world.transform(local_point, world.root)
@@ -238,6 +197,41 @@ def _surface_pose(world, surface, object_body, offset):
     )
 
 
+def _object_lower_z(placement):
+    # The pose sits the object on the surface, so its lowest point is needed
+    # before the body exists.
+    _check_geometry(placement)
+    if placement.scale is not None:
+        return -placement.scale[2] / 2
+    mesh_world = STLParser(os.path.join(OBJECTS_DIR, placement.mesh)).parse()
+    return float(mesh_world.root.combined_mesh.bounds[0][2])
+
+
+def _check_geometry(placement):
+    if (placement.mesh is None) == (placement.scale is None):
+        raise ValueError(f"{placement.name!r} must define exactly one of mesh or scale")
+
+
+def _create_object(world, placement, pose):
+    _check_geometry(placement)
+    if placement.scale is not None:
+        annotation = placement.annotation_type.create_with_new_body_in_world(
+            name=PrefixedName(placement.name),
+            world=world,
+            world_root_T_self=pose,
+            scale=Scale(*placement.scale),
+        )
+        _apply_color(annotation.root, placement.annotation_type)
+        return annotation
+    object_world = STLParser(os.path.join(OBJECTS_DIR, placement.mesh)).parse()
+    _apply_color(object_world.root, placement.annotation_type)
+    world.merge_world_at_pose(object_world, pose)
+    body = world.get_body_by_name(placement.name)
+    annotation = placement.annotation_type(root=body)
+    world.add_semantic_annotation(annotation)
+    return annotation
+
+
 def _place_surface_objects(world, placements):
     if not placements:
         return
@@ -247,13 +241,10 @@ def _place_surface_objects(world, placements):
             surface = get_annotation(
                 world, placement.surface, HasSupportingSurface, usable_surface=True
             )
-            object_world = _object_world(placement)
-            _apply_color(object_world.root, placement.annotation_type)
-            pose = _surface_pose(world, surface, object_world.root, placement.offset)
-            world.merge_world_at_pose(object_world, pose)
-            body = world.get_body_by_name(placement.name)
-            object_annotation = placement.annotation_type(root=body)
-            world.add_semantic_annotation(object_annotation)
+            pose = _surface_pose(
+                world, surface, _object_lower_z(placement), placement.offset
+            )
+            object_annotation = _create_object(world, placement, pose)
             surface.add_object(object_annotation)
 
 
@@ -263,23 +254,14 @@ def _place_contained_objects(world, placements):
 
     with world.modify_world():
         for placement in placements:
-            object_world = _object_world(placement)
-            _apply_color(object_world.root, placement.annotation_type)
             parent = world.get_body_by_name(placement.container)
-            world.merge_world(
-                object_world,
-                FixedConnection(
-                    parent=parent,
-                    child=object_world.root,
-                    parent_T_connection_expression=(
-                        HomogeneousTransformationMatrix.from_xyz_rpy(
-                            *placement.offset, reference_frame=parent
-                        )
-                    ),
+            pose = world.transform(
+                HomogeneousTransformationMatrix.from_xyz_rpy(
+                    *placement.offset, reference_frame=parent
                 ),
+                world.root,
             )
-            body = world.get_body_by_name(placement.name)
-            world.add_semantic_annotation(placement.annotation_type(root=body))
+            _create_object(world, placement, pose)
 
     # Storage registration also reparents through semDT's public storage API.
     for placement in placements:
@@ -294,10 +276,12 @@ def _place_contained_objects(world, placements):
 def _body_bounds_in_frame(world, body, frame):
     if body.combined_mesh is None:
         raise RuntimeError(f"Body {body.name!s} has no collision geometry")
-    mesh = body.combined_mesh.copy()
-    frame_transform = world.compute_forward_kinematics(root=frame, tip=body)
-    mesh.apply_transform(frame_transform.to_np())
-    return mesh.bounds
+    shapes = body.area if isinstance(body, Region) else body.collision
+    bounding_box = shapes.as_bounding_box_collection_in_frame(frame).bounding_box()
+    return (
+        (bounding_box.min_x, bounding_box.min_y, bounding_box.min_z),
+        (bounding_box.max_x, bounding_box.max_y, bounding_box.max_z),
+    )
 
 
 def _validate_surface_geometry(world, body, surface):
@@ -428,14 +412,8 @@ def _validate_environment(world, spec):
 
 def _build_environment(spec):
     urdf_root = ET.parse(spec.urdf).getroot()
-
-    # The kitchen URDF contains a duplicate limit that would freeze the drawer.
-    left_drawer_joint = urdf_root.find(
-        "./joint[@name='oven_area_area_left_drawer_main_joint']"
-    )
-    if left_drawer_joint is not None:
-        for duplicate_limit in left_drawer_joint.findall("limit")[1:]:
-            left_drawer_joint.remove(duplicate_limit)
+    if spec.urdf_customizer is not None:
+        spec.urdf_customizer(urdf_root)
 
     world = URDFParser(urdf=ET.tostring(urdf_root, encoding="unicode")).parse()
 
@@ -466,8 +444,6 @@ def _attach_robot(world, robot_name, start_pose):
         drive.origin = HomogeneousTransformationMatrix.from_xyz_rpy(*start_pose)
         drive.has_hardware_interface = True
 
-    if not drive.has_hardware_interface:
-        raise RuntimeError(f"Drive for robot {robot_name!r} is not controlled")
     return robot_type.from_world(world)
 
 
@@ -512,7 +488,7 @@ def _clear_markers(node, topic="/semworld/viz_marker", timeout=5.0):
     publisher.publish(marker_array)
 
 
-def _start_visualization(world):
+def start_visualization(world):
     import rclpy
     from semantic_digital_twin.adapters.ros.visualization.viz_marker import (
         VizMarkerPublisher,
@@ -529,7 +505,7 @@ def _start_visualization(world):
 def build_world(robot_name="hsrb", environment="apartment", *, visualize=True):
     """Build the Binder demo and optionally start its ROS visualization node."""
     world, robot, context = build_world_model(robot_name, environment)
-    node = _start_visualization(world) if visualize else None
+    node = start_visualization(world) if visualize else None
     return world, robot, context, node
 
 

@@ -12,10 +12,13 @@ from thesis_demo.validation.guard import (
     context_names,
     verify,
 )
-from thesis_demo.validation.schema import parse_clarification, parse_plan
+from thesis_demo.validation.schema import (
+    PLAN_STEP_FIELDS,
+    parse_clarification,
+    parse_plan,
+)
 
 OUTCOMES = {"plan", "clarification"}
-PLAN_FIELDS = {"action", "object", "location", "relation", "source"}
 
 MAIN_METRICS = (
     "planning_success",
@@ -40,7 +43,7 @@ def _valid_expected_plan(plan, outcome):
         return False
     steps = plan if isinstance(plan, list) else [plan]
     return all(
-        isinstance(step, dict) and step and not (set(step) - PLAN_FIELDS)
+        isinstance(step, dict) and step and not (set(step) - PLAN_STEP_FIELDS)
         for step in steps
     )
 

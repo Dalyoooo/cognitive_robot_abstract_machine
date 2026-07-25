@@ -210,6 +210,15 @@ def create_parser():
     argument_parser.add_argument(
         "--max-tokens", type=int, default=planner.MAX_NEW_TOKENS
     )
+    argument_parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=1,
+        help=(
+            "Planner generations per turn. Above 1, a rejection feeds the "
+            "validation error back to the model for another attempt."
+        ),
+    )
     return argument_parser
 
 
@@ -361,6 +370,7 @@ def main():
         seed=arguments.seed,
         temperature=arguments.temperature,
         max_tokens=arguments.max_tokens,
+        max_attempts=arguments.max_attempts,
     )
     log_event(
         logger,

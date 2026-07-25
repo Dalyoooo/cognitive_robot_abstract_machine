@@ -11,9 +11,9 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import String
 from thesis_demo_msgs.action import ExecutePlan
 
-from thesis_demo.execution.execution import log_world_stats, run_plan
+from thesis_demo.execution.execution import run_plan
 from thesis_demo.execution.grounding import GroundingError
-from thesis_demo.planner.world_context import classify_world
+from thesis_demo.planner.world_context import build_world_context
 from thesis_demo.validation.schema import parse_plan
 from thesis_demo.world.nlp_demo import build_world
 
@@ -107,8 +107,7 @@ class PlanExecutor:
             self.busy = False
 
     def publish_context(self):
-        log_world_stats(self.world, "context_write")
-        context_data = classify_world(self.world, self.robot)
+        context_data = build_world_context(self.world, self.robot)
         _atomic_write_json(_context_file(), context_data)
         message = String()
         message.data = json.dumps(context_data)

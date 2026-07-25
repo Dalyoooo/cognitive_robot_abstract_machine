@@ -7,10 +7,6 @@ _DEMOS_DIR = Path(__file__).resolve().parents[3]
 if str(_DEMOS_DIR) not in sys.path:
     sys.path.insert(0, str(_DEMOS_DIR))
 
-_ROOT = Path(__file__).resolve().parents[1]
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
-
 import torch
 import unsloth
 from transformers import DataCollatorForSeq2Seq
@@ -31,7 +27,6 @@ from thesis_demo.tools.training.config import (
     load_dataset,
     parse_args,
     text_tokenizer,
-    validate_direct_conversations as _validate_direct_conversations,
 )
 from thesis_demo.validation.guard import verify
 
@@ -110,7 +105,7 @@ SANITY_CASES = (
 )
 
 
-def generate(model, tokenizer, messages, max_new_tokens=2048):
+def _generate(model, tokenizer, messages, max_new_tokens=2048):
     tokens = tokenizer.apply_chat_template(
         messages,
         tokenize=True,
@@ -128,10 +123,6 @@ def generate(model, tokenizer, messages, max_new_tokens=2048):
     return tokenizer.decode(
         output[0][tokens.shape[1] :], skip_special_tokens=True
     ).strip()
-
-
-def _generate(model, tokenizer, messages, max_new_tokens=2048):
-    return generate(model, tokenizer, messages, max_new_tokens)
 
 
 def _sanity_transport(plan, case):
@@ -182,15 +173,11 @@ def _check_sanity_case(model, tokenizer, generate_response, case):
     _sanity_container_actions(plan, case)
 
 
-def run_sanity_check(model, tokenizer, generate_response, fast_model):
-    fast_model.for_inference(model)
-    for case in SANITY_CASES:
-        _check_sanity_case(model, tokenizer, generate_response, case)
-    print(">>> Sanity check passed: all 3 planner behavior cases are valid.")
-
-
 def _run_sanity_check(model, tokenizer):
-    return run_sanity_check(model, tokenizer, _generate, unsloth.FastModel)
+    unsloth.FastModel.for_inference(model)
+    for case in SANITY_CASES:
+        _check_sanity_case(model, tokenizer, _generate, case)
+    print(">>> Sanity check passed: all 3 planner behavior cases are valid.")
 
 
 def _run_sanity_check_nonfatal(model, tokenizer):

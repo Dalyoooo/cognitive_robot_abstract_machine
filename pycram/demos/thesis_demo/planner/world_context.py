@@ -1,4 +1,3 @@
-import re
 from dataclasses import dataclass, field
 
 from semantic_digital_twin.reasoning.predicates import InsideOf, is_supported_by
@@ -30,7 +29,15 @@ from thesis_demo.world.environments import FURNITURE_ANNOTATION_TYPES
 CONTAINMENT_THRESHOLD = 0.9
 
 
-def build_world_context(world, robot, names=None):
+def content_types_of(annotation):
+    return [
+        ancestor
+        for ancestor in type(annotation).mro()
+        if ancestor is not HasRootBody and issubclass(ancestor, HasRootBody)
+    ]
+
+
+def build_world_context(world, robot):
     rooms = world.get_semantic_annotations_by_type(Room)
     grouped_annotations = group_annotations_by_body(world)
     hidden_roots = _hidden_body_roots(rooms, grouped_annotations)
@@ -47,82 +54,129 @@ def build_world_context(world, robot, names=None):
         if annotations:
             task_annotations[root] = annotations
 
-    planner_names = names.by_canonical_name if names else build_planner_names(world)
+    task_annotations = dict(
+        sorted(task_annotations.items(), key=lambda item: str(item[0].name))
+    )
+
+    planner_names = build_type_names(world)
 
     entities = _WorldContextEntities.from_annotations(
         rooms,
         task_annotations,
         planner_names,
     )
-    object_locations = entities.build_object_locations(task_annotations)
-    return entities.to_context(rooms, planner_names, object_locations)
+    location_index = ObjectLocations(
+        entities.containers,
+        entities.surfaces,
+        task_annotations,
+    )
+    object_locations = entities.build_object_locations(location_index)
+    context = entities.to_context(rooms, planner_names, object_locations)
+    context["instances"] = _distinguishing_qualifiers(
+        entities,
+        task_annotations,
+        location_index,
+    )
+    return context
 
 
-@dataclass(frozen=True)
-class PlannerNames:
-    by_canonical_name: dict
-    by_body: dict
-    bodies_by_name: dict
-    rooms_by_name: dict
-    annotations_by_body: dict
-
-    @classmethod
-    def build(cls, world):
-        by_canonical_name = build_planner_names(world)
-        by_body = {body: by_canonical_name[str(body.name)] for body in world.bodies}
-        bodies_by_name = {name: body for body, name in by_body.items()}
-        rooms = world.get_semantic_annotations_by_type(Room)
-        rooms_by_name = {by_canonical_name[str(room.name)]: room for room in rooms}
-        return cls(
-            by_canonical_name,
-            by_body,
-            bodies_by_name,
-            rooms_by_name,
-            group_annotations_by_body(world),
-        )
-
-
-# ----- Names -------------------------
-
-
-def build_planner_names(world):
-    rooms = world.get_semantic_annotations_by_type(Room)
+def build_type_names(world):
     grouped_annotations = group_annotations_by_body(world)
-
-    names_by_token = {}
+    names = {}
     for body in world.bodies:
         annotations = grouped_annotations.get(body, [])
         if annotations:
-            token = _snake_token(planner_type_name(annotations))
-        else:
-            token = str(body.name).rsplit("/", 1)[-1]
-        names_by_token.setdefault(token, []).append(str(body.name))
+            names[str(body.name)] = planner_type_name(annotations)
+    for room in world.get_semantic_annotations_by_type(Room):
+        names[str(room.name)] = type(room).__name__
+    return names
 
-    for room in rooms:
-        token = _snake_token(type(room).__name__)
-        names_by_token.setdefault(token, []).append(str(room.name))
 
-    planner_names = {}
-    reserved_names = set(names_by_token)
-    for token, names in names_by_token.items():
-        if len(names) == 1:
-            planner_names[names[0]] = token
+def _stored_objects(root, task_annotations):
+    return [
+        stored_object
+        for annotation in task_annotations.get(root, [])
+        if isinstance(annotation, HasStorageSpace)
+        for stored_object in annotation.objects
+        if stored_object.root is not root
+    ]
+
+
+def _common_content_type_name(stored_objects):
+    shared = set(content_types_of(stored_objects[0]))
+    for stored_object in stored_objects[1:]:
+        shared &= set(content_types_of(stored_object))
+    for content_type in content_types_of(stored_objects[0]):
+        if content_type in shared:
+            return content_type.__name__
+    return None
+
+
+def _qualifiers_for_root(root, task_annotations, location_index):
+    stored_objects = _stored_objects(root, task_annotations)
+    if stored_objects:
+        content_type_name = _common_content_type_name(stored_objects)
+        if content_type_name is not None:
+            return {"contains": content_type_name}
+    places = location_index.locations_for(root)
+    return {"at": places[0]} if places else {}
+
+
+def _matches_qualifiers(root, qualifiers, task_annotations, location_index):
+    content_type_name = qualifiers.get("contains")
+    if content_type_name is not None:
+        held_type_names = {
+            content_type.__name__
+            for stored_object in _stored_objects(root, task_annotations)
+            for content_type in content_types_of(stored_object)
+        }
+        if content_type_name not in held_type_names:
+            return False
+    place_name = qualifiers.get("at")
+    if place_name is not None and place_name not in location_index.locations_for(root):
+        return False
+    return True
+
+
+def _distinguishing_qualifiers(entities, task_annotations, location_index):
+    roots_by_type = {}
+    for type_name, root in (
+        *entities.objects,
+        *entities.surfaces,
+        *entities.containers,
+    ):
+        roots = roots_by_type.setdefault(type_name, [])
+        if not any(known is root for known in roots):
+            roots.append(root)
+
+    instances = {}
+    for type_name, roots in roots_by_type.items():
+        if len(roots) < 2:
             continue
-        sorted_names = sorted(names)
-        descriptive_names = _unique_body_part_names(sorted_names, reserved_names)
-        if descriptive_names is not None:
-            planner_names.update(zip(sorted_names, descriptive_names, strict=True))
-            reserved_names.update(descriptive_names)
-            continue
-        for index, name in enumerate(sorted_names, start=1):
-            planner_names[name] = f"{token}_{index}"
-    return planner_names
-
-
-def _snake_token(class_name):
-    words = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", class_name)
-    words = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", words)
-    return "_".join(words.lower().split())
+        qualifier_sets = []
+        for root in roots:
+            qualifiers = _qualifiers_for_root(
+                root,
+                task_annotations,
+                location_index,
+            )
+            if not qualifiers or qualifiers in qualifier_sets:
+                continue
+            named = [
+                candidate
+                for candidate in roots
+                if _matches_qualifiers(
+                    candidate,
+                    qualifiers,
+                    task_annotations,
+                    location_index,
+                )
+            ]
+            if len(named) == 1:
+                qualifier_sets.append(qualifiers)
+        if qualifier_sets:
+            instances[type_name] = qualifier_sets
+    return instances
 
 
 def planner_type_name(annotations):
@@ -138,27 +192,6 @@ def most_specific_annotation(annotations):
         return len(annotation_type.mro()), annotation_type.__name__
 
     return max(annotations, key=priority)
-
-
-def _body_part_name(name):
-    if "/" not in name:
-        return None
-    local_name = name.rsplit("/", 1)[-1].removesuffix("_main")
-    return _snake_token(local_name) if local_name else None
-
-
-def _unique_body_part_names(names, reserved_names):
-    descriptive_names = [_body_part_name(name) for name in names]
-    if not all(descriptive_names):
-        return None
-    if len(descriptive_names) != len(set(descriptive_names)):
-        return None
-    if set(descriptive_names).intersection(reserved_names):
-        return None
-    return descriptive_names
-
-
-# ----- Entity classification - LLM context -----
 
 
 @dataclass
@@ -180,17 +213,13 @@ class _WorldContextEntities:
             entities._classify_body(root, annotations, planner_names)
         return entities
 
-    def build_object_locations(self, grouped_annotations):
-        object_locations = ObjectLocations(
-            self.containers,
-            self.surfaces,
-            grouped_annotations,
-        )
+    def build_object_locations(self, location_index):
         locations = {}
-        for name, root in self.objects:
-            locations_for_object = object_locations.locations_for(root)
-            if locations_for_object:
-                locations[name] = locations_for_object
+        for type_name, root in self.objects:
+            for place in location_index.locations_for(root):
+                places = locations.setdefault(type_name, [])
+                if place not in places:
+                    places.append(place)
         return locations
 
     def to_context(self, rooms, planner_names, object_locations):
@@ -279,9 +308,6 @@ def _hidden_body_roots(rooms, annotations_by_root):
         if any(annotation in hidden_annotations for annotation in annotations)
     )
     return hidden_roots
-
-
-# ----- Object locations -----
 
 
 @dataclass

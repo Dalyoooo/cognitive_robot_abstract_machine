@@ -12,7 +12,7 @@ from std_msgs.msg import String
 from thesis_demo_msgs.action import ExecutePlan
 
 from thesis_demo.execution.execution import run_plan_as_result
-from thesis_demo.planner.world_context import PlannerNames, build_world_context
+from thesis_demo.planner.world_context import build_world_context
 from thesis_demo.validation.schema import parse_plan
 from thesis_demo.world.nlp_demo import build_world
 
@@ -63,14 +63,10 @@ class PlanExecutor:
     node: object
     context: object
     busy: bool = False
-    names: object = field(init=False, default=None)
     context_publisher: object = field(init=False, default=None)
     action_server: object = field(init=False, default=None)
 
     def start(self):
-        # Planner names only depend on body names and annotation types, which
-        # execution never changes, so they are built once per world.
-        self.names = PlannerNames.build(self.context.world)
         self.context_publisher = self.node.create_publisher(
             String, CONTEXT_TOPIC, _latched_qos()
         )
@@ -108,9 +104,7 @@ class PlanExecutor:
             self.busy = False
 
     def publish_context(self):
-        context_data = build_world_context(
-            self.context.world, self.context.robot, self.names
-        )
+        context_data = build_world_context(self.context.world, self.context.robot)
         _atomic_write_json(_context_file(), context_data)
         message = String()
         message.data = json.dumps(context_data)
@@ -132,7 +126,6 @@ class PlanExecutor:
             self.context,
             steps,
             step_callback=publish_feedback,
-            names=self.names,
         )
         if result["phase"] == "execution" and result["status"] == "error":
             self.node.get_logger().error(f"Execution failed: {result['error']}")

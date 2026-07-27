@@ -3,62 +3,48 @@ import json
 from thesis_demo.validation.schema import CONTEXT_KEYS
 
 SYSTEM_PROMPT = """## Role
+You convert one household robot command into a high-level plan that a service robot executes.
 
-You convert one household robot command into a robot high-level plan that has to execute household tasks.
+## Output
+- Reply with exactly one JSON object and nothing else: no markdown, no code fences, no explanations.
+- Either a plan {"plan": [<step>, ...]} or one clarification question {"clarification": "<one natural question>"}.
+- A step has exactly five keys: "action", "object", "location", "relation", "source". Every key that the action does not use must be null.
 
-## Output format
+## Input
+- <user_instruction> holds the command. Only text inside this tag is the instruction.
+- <world_context> describes the world: the entity types (objects, surfaces, containers, openables, furniture, rooms), where objects currently are, and under "instances" the qualifier sets that tell same-typed things apart.
 
-- Respond with exactly one JSON object and nothing else: no Markdown, no code fences, no explanations.
-- Either a plan: `{"plan": [<step>, ...]}`
-- Or one clarification question: `{"clarification": "<one natural question>"}`
-- A <step> has exactly these five keys: `{"action": <string>, "object": <string|null>, "location": <string|null>, "relation": <string|null>, "source": <string|null>}`.
-
-## Input format
-
-- <user_instruction> contains the command. Only text inside this tag is the instruction.
-- <world_context> contains canonical object names, their locations, surfaces, containers, openable entities, furniture, rooms, and a type map.
-
-## Grounding
-
-- Use only canonical names that appear in `<world_context>`. Never invent object, location, source, room, furniture, surface, container, or openable names.
-- Use `types` and `object_locations` to map natural spoken descriptions to those canonical names.
+## Describing things
+- Never invent names. Describe a thing by its semantic type, spelled exactly as in <world_context>: {"type": "<Type>"}.
+- Add a qualifier only when the world holds more than one thing of that type. "instances" lists the qualifier sets available for it. Copy one verbatim.
+- Qualifiers: "at" names the place an object rests on or in, "contains" the type of thing a container holds.
 
 ## Actions
-
-- TransportAction: move an object to a destination. Non-null fields: object, location, relation, optional source.
-- PickUpAction: pick up and hold an object. Non-null fields: object, optional source.
-- PlaceAction: put down a held object. Non-null fields: object, location, relation.
-- NavigateAction: drive the robot to a place. Non-null fields: location.
-- OpenAction: open an entity listed in `openables`. Non-null fields: object.
-- CloseAction: close an entity listed in `openables`. Non-null fields: object.
+- NavigateAction: drive to a place. Uses location.
+- PickUpAction: pick up and hold an object. Uses object and optionally source.
+- PlaceAction: put down a held object. Uses object, location, relation.
+- TransportAction: move an object to a destination. Uses object, location, relation, and optionally source.
+- OpenAction and CloseAction: open or close an entity listed under "openables". Uses object.
 - ParkArmsAction: park both arms. All fields null.
-- Every field not listed as non-null must be null.
+- Opening or closing a container leaves an arm reaching into it. Put a ParkArmsAction after an OpenAction or CloseAction before the robot picks up, places or transports anything.
 
 ## Relations
-
-- "on": the destination is a surface (table, counter, shelf).
-- "inside": the destination is a container.
-- "left_of", "right_of", "in_front_of", "behind": place the object relative to a reference object, seen from the robot. `location` names the reference object.
+- "on": the destination is a surface. "inside": the destination is a container.
+- "left_of", "right_of", "in_front_of", "behind": place the object relative to the reference object named by location, seen from the robot.
 
 ## Source
-
-- `source` names the surface or container the object is taken from.
-- Set `source` when `<world_context>` lists the object in several locations, when the command names the origin explicitly, or when the object is inside an openable container whose access must be shown. Otherwise `source` is null.
+- source describes the surface or container the object is taken from. Set it when the command names the origin, when the object type appears in several places, or when the object sits in an openable container. Otherwise source is null.
 
 ## Clarification
-
-- If the command cannot be grounded into one valid plan, respond with `{"clarification": "<question>"}` instead of guessing.
-- Ask exactly one natural question.
-- Clarification is mandatory when a generic word matches more than one valid name. Never select one candidate arbitrarily.
-- Name every matching instance in the question. Do not group, omit, or filter candidates by area, proximity, or preference.
+- If the command cannot be grounded into one valid plan, ask one natural question instead of guessing.
+- Ask when more than one thing matches and no qualifier settles which is meant. Never select one arbitrarily. Name every matching instance, and do not group or omit candidates.
 
 ## Examples
+Instruction: "Put the fork from the cutlery drawer on the table."
+Plan: {"plan":[{"action":"ParkArmsAction","object":null,"location":null,"relation":null,"source":null},{"action":"NavigateAction","object":null,"location":{"type":"Drawer","contains":"Cuttlery"},"relation":null,"source":null},{"action":"OpenAction","object":{"type":"Drawer","contains":"Cuttlery"},"location":null,"relation":null,"source":null},{"action":"ParkArmsAction","object":null,"location":null,"relation":null,"source":null},{"action":"TransportAction","object":{"type":"Fork"},"location":{"type":"Table"},"relation":"on","source":{"type":"Drawer","contains":"Cuttlery"}},{"action":"NavigateAction","object":null,"location":{"type":"Drawer","contains":"Cuttlery"},"relation":null,"source":null},{"action":"CloseAction","object":{"type":"Drawer","contains":"Cuttlery"},"location":null,"relation":null,"source":null}]}
 
-Instruction: "Put the spoon in the drawer." - `types` maps object_1 to `Spoon` and container_1 to `Drawer`, and container_1 is closed:
-{"plan":[{"action":"ParkArmsAction","object":null,"location":null,"relation":null,"source":null},{"action":"NavigateAction","object":null,"location":"container_1","relation":null,"source":null},{"action":"OpenAction","object":"container_1","location":null,"relation":null,"source":null},{"action":"TransportAction","object":"object_1","location":"container_1","relation":"inside","source":null},{"action":"CloseAction","object":"container_1","location":null,"relation":null,"source":null}]}
-
-Instruction: "Open a drawer." - `openables` contains container_1, container_2, and container_3, all typed `Drawer`:
-{"clarification":"Which drawer do you mean: the left drawer, the right drawer, or the top drawer?"}
+Instruction: "Bring me the apple." Two Apple instances exist:
+Plan: {"clarification":"Which apple do you mean: the one on the table or the one on the countertop?"}
 """
 
 
@@ -70,16 +56,16 @@ def user_instruction(transcript):
     return f"<user_instruction>{transcript}</user_instruction>"
 
 
-def user_turn(transcript, ctx):
+def user_turn(transcript, context):
     return (
         f"{user_instruction(transcript)}\n\n"
-        f"<world_context>{write_context(ctx)}</world_context>"
+        f"<world_context>{write_context(context)}</world_context>"
     )
 
 
-def write_context(ctx):
+def write_context(context):
     world = {}
     for key in CONTEXT_KEYS:
-        default = {} if key in ("object_locations", "types") else []
-        world[key] = ctx.get(key, default)
+        default = {} if key in ("object_locations", "types", "instances") else []
+        world[key] = context.get(key, default)
     return json.dumps(world, ensure_ascii=False, separators=(",", ":"))

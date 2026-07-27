@@ -247,7 +247,7 @@ def _execute_plan(case, session, payload, logger, deadline):
 def _stop_world_logged(case, session, logger):
     try:
         session.stop_world()
-    except Exception as exc:
+    except Exception as error:
         if logger is not None:
             log_exception(
                 logger,
@@ -255,8 +255,8 @@ def _stop_world_logged(case, session, logger):
                 {
                     "case_id": case.id,
                     "phase": "teardown",
-                    "error_type": type(exc).__name__,
-                    "error": str(exc),
+                    "error_type": type(error).__name__,
+                    "error": str(error),
                 },
             )
         raise
@@ -562,18 +562,17 @@ def _run_case(
 
 
 def _record_case_failure(result, case, stage, logger, error, timed_out):
-    """Charge an aborted case to whichever stage it died in."""
     elapsed = stage.elapsed()
     result.timed_out = timed_out
     result.failure_stage = stage.name
     result.error = str(error) if timed_out else f"{type(error).__name__}: {error}"
 
     if stage.name == "execution":
-        result.execution_latency_s += elapsed
+        result.execution_latency_s = elapsed
         result.execution_status = "timeout" if timed_out else "error"
         result.execution_success = False
     elif stage.name == "planning":
-        result.planning_latency_s += elapsed
+        result.planning_latency_s = elapsed
         if timed_out:
             result.planning_success = False
 

@@ -14,15 +14,12 @@ from thesis_demo.planner.prompt import system_prompt, user_instruction, user_tur
 from thesis_demo.validation.guard import GuardReport, inspect as inspect_plan
 from thesis_demo.validation.schema import parse_clarification, parse_plan
 
-MAX_NEW_TOKENS = 2048
-N_CTX = 16384  # context window
-
 
 @dataclass(frozen=True)
 class InferenceConfiguration:
     seed: int = 0
     temperature: float = 0.0
-    max_tokens: int = MAX_NEW_TOKENS
+    max_tokens: int = -1  # -1: generate until EOS
     base_seed: int | None = None
     max_attempts: int = 1
 
@@ -73,7 +70,7 @@ def setup_planner(
     model,
     gguf_file=None,
     n_gpu_layers=None,
-    n_ctx=N_CTX,
+    n_ctx=0,  # 0: native context size of the loaded model
     inference=None,
 ):
     _state.llm = None

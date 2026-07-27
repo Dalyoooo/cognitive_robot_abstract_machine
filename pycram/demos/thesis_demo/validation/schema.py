@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 
 CONTEXT_KEYS = (
+    "instances",
     "objects",
     "object_locations",
     "surfaces",
@@ -13,6 +14,7 @@ CONTEXT_KEYS = (
 )
 
 DIRECTIONAL_RELATIONS = ("left_of", "right_of", "in_front_of", "behind")
+DESCRIPTION_QUALIFIERS = ("at", "contains")
 INSIDE_RELATIONS = ("inside",)
 PLAN_STEP_FIELDS = {"action", "object", "location", "relation", "source"}
 
@@ -64,18 +66,58 @@ DESTINATION_ACTIONS = {
     if {"object", "location"} <= spec.required_fields
 }
 
+# Working a container leaves the arm stretched over it; taking hold of anything
+# needs it back in its parked pose first.
+CONTAINER_ACTIONS = {"OpenAction", "CloseAction"}
+GRASPING_ACTIONS = {"PickUpAction", "PlaceAction", "TransportAction"}
+
 
 def format_choices(values):
     return ", ".join(sorted(values))
 
 
+def _validate_description(field_name, description):
+    if not isinstance(description, dict):
+        raise ValueError(f"{field_name} must be an object describing an entity")
+
+    entity_type = description.get("type")
+    if not isinstance(entity_type, str) or not entity_type:
+        raise ValueError(f"{field_name} needs a non-empty 'type'")
+
+    unknown = sorted(set(description) - {"type", *DESCRIPTION_QUALIFIERS})
+    if unknown:
+        raise ValueError(
+            f"{field_name} has unknown qualifier(s) {unknown}; "
+            f"valid: {format_choices(DESCRIPTION_QUALIFIERS)}"
+        )
+    for qualifier in DESCRIPTION_QUALIFIERS:
+        value = description.get(qualifier)
+        if value is not None and (not isinstance(value, str) or not value):
+            raise ValueError(f"{field_name}.{qualifier} must be a non-empty string")
+
+
+def render(description):
+    if description is None:
+        return "nothing"
+    qualifiers = ", ".join(
+        f"{key}={value}" for key, value in sorted(description.items()) if key != "type"
+    )
+    return f"{description['type']}({qualifiers})" if qualifiers else description["type"]
+
+
+def description_key(description):
+    if description is None:
+        return None
+    return tuple(sorted(description.items()))
+
+
 @dataclass
 class PlanStep:
     action: str
-    object: str | None = None
-    location: str | None = None
+    object: dict | None = None
+    location: dict | None = None
     relation: str | None = None
-    source: str | None = None
+    source: dict | None = None
 
     def validate(self):
         self._validate_action()
@@ -131,15 +173,16 @@ class PlanStep:
             )
 
     def _validate_names(self):
-        names = {
-            "object": self.object,
-            "location": self.location,
-            "relation": self.relation,
-            "source": self.source,
-        }
-        for field_name, value in names.items():
-            if value is not None and (not isinstance(value, str) or not value):
-                raise ValueError(f"{field_name} must be a non-empty string or null")
+        if self.relation is not None and (
+            not isinstance(self.relation, str) or not self.relation
+        ):
+            raise ValueError("relation must be a non-empty string or null")
+        if self.object is not None:
+            _validate_description("object", self.object)
+        if self.location is not None:
+            _validate_description("location", self.location)
+        if self.source is not None:
+            _validate_description("source", self.source)
 
     def _validate_required_field(self, spec, field_name, value, hint):
         if field_name in spec.required_fields and value is None:

@@ -460,7 +460,6 @@ def build_world_model(robot_name="hsrb", environment="apartment"):
     world.validate()
 
     context = Context(world=world, robot=robot)
-    context.evaluate_conditions = False
     return world, robot, context
 
 

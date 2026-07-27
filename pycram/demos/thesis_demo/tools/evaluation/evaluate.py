@@ -198,12 +198,10 @@ def create_parser():
         ),
     )
     argument_parser.add_argument("--n-gpu-layers", type=int)
-    argument_parser.add_argument("--n-ctx", type=int, default=planner.N_CTX)
+    argument_parser.add_argument("--n-ctx", type=int, default=0)
     argument_parser.add_argument("--seed", type=int, default=0)
     argument_parser.add_argument("--temperature", type=float, default=0.0)
-    argument_parser.add_argument(
-        "--max-tokens", type=int, default=planner.MAX_NEW_TOKENS
-    )
+    argument_parser.add_argument("--max-tokens", type=int, default=-1)
     argument_parser.add_argument(
         "--max-attempts",
         type=int,

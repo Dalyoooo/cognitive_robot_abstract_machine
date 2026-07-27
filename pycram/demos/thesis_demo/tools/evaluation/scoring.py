@@ -11,7 +11,11 @@ from thesis_demo.validation.guard import (
     allowed_objects_for,
     context_names,
 )
-from thesis_demo.validation.schema import DIRECTIONAL_RELATIONS, PLAN_STEP_FIELDS
+from thesis_demo.validation.schema import (
+    DIRECTIONAL_RELATIONS,
+    PLAN_STEP_FIELDS,
+    render,
+)
 
 OUTCOMES = {"plan", "clarification"}
 
@@ -44,7 +48,6 @@ def _valid_expected_plan(plan, outcome):
 
 
 def _validate_clarification(case_id, answer, targets, follow_up_plan):
-    """Check the fields only a clarification case is allowed to carry."""
     if not isinstance(targets, list) or not targets:
         raise ValueError(
             f"{case_id}: expected_clarification_targets must be "
@@ -56,7 +59,6 @@ def _validate_clarification(case_id, answer, targets, follow_up_plan):
             "a non-empty string list"
         )
 
-    # A case may either just ask the question, or script the whole dialog.
     if answer is None and follow_up_plan is None:
         return
     if not isinstance(answer, str) or not answer.strip():
@@ -346,12 +348,6 @@ def allowed_names_for_step(step, names):
 
 
 def plan_quality_metrics(case, outcome, payload, planner_metadata=None):
-    """What the planner got right, gate by gate.
-
-    The planner already validated this response to decide the outcome, so its
-    own report is the answer; re-running the schema and guard here could only
-    ever repeat it.
-    """
     planner_metadata = planner_metadata or {}
     return {
         "json_object_valid": bool(planner_metadata.get("json_valid")),
@@ -364,8 +360,6 @@ def plan_quality_metrics(case, outcome, payload, planner_metadata=None):
 
 
 class FailedCheck(StrEnum):
-    """The gates a case passes through, in the order they are decided."""
-
     JSON_OBJECT = "json_object"
     SCHEMA = "schema"
     NAMES = "names"
@@ -379,10 +373,6 @@ class FailedCheck(StrEnum):
 
 
 def first_failed_check(metrics, reachability_success, execution_success):
-    """The earliest gate this case did not pass, or None if it passed them all.
-
-    ``None`` for a metric means the gate never ran, which is not a failure.
-    """
     gates = (
         (FailedCheck.JSON_OBJECT, metrics.get("json_object_valid")),
         (FailedCheck.SCHEMA, metrics.get("schema_valid")),
@@ -403,10 +393,6 @@ def first_failed_check(metrics, reachability_success, execution_success):
 
 @dataclass
 class GoalChecks:
-    """
-    One family of end-state expectations and how they turned out.
-    """
-
     expected: int = 0
     checked: int = 0
     errors: list = field(default_factory=list)
@@ -440,52 +426,70 @@ class GoalChecks:
 def final_location_goals(case):
     goals_by_object = {}
     for goal in case.goals():
-        object_name = goal.get("object")
-        if object_name and goal.get("location"):
-            goals_by_object[object_name] = goal
+        object_description = goal.get("object")
+        if object_description and goal.get("location"):
+            goals_by_object[render(object_description)] = goal
     return list(goals_by_object.values())
 
 
 def _final_action_per_object(case):
-    """The last thing the benchmark says about each object."""
     actions = {}
     for goal in case.goals():
         if goal.get("action") and goal.get("object"):
-            actions[goal["object"]] = goal["action"]
+            actions[render(goal["object"])] = goal["action"]
     return actions
 
 
 def _containers_left_open_on_purpose(case):
-    """Containers the task itself asks to leave open at the end."""
-    left_open = {}
+    container_states = {}
     for goal in case.goals():
         if goal.get("action") == "OpenAction":
-            left_open[goal.get("object")] = True
+            container_states[render(goal.get("object"))] = True
         elif goal.get("action") == "CloseAction":
-            left_open[goal.get("object")] = False
-    return {name for name, is_open in left_open.items() if is_open}
+            container_states[render(goal.get("object"))] = False
+    return {
+        name
+        for name, should_remain_open in container_states.items()
+        if should_remain_open
+    }
 
 
 def location_checks(case, final_context):
-    """Did every object the task moves end up where it was supposed to?"""
     checks = GoalChecks()
-    locations = final_context.get("object_locations")
+    object_locations = final_context.get("object_locations")
     for goal in final_location_goals(case):
         if goal.get("relation") in DIRECTIONAL_RELATIONS:
-            # A directional placement is judged geometrically, by physical_checks.
             continue
 
-        object_name = goal["object"]
-        expected = goal["location"]
-        expected = expected if isinstance(expected, list) else [expected]
-        description = f"location: {object_name!r} is at one of {expected!r}"
+        object_description = render(goal["object"])
+        object_type = goal["object"]["type"]
+        expected_locations = goal["location"]
+        expected_locations = (
+            expected_locations
+            if isinstance(expected_locations, list)
+            else [expected_locations]
+        )
+        expected_location_types = [
+            location["type"] for location in expected_locations
+        ]
+        description = (
+            f"location: {object_description} is at one of "
+            f"{expected_location_types!r}"
+        )
 
-        if not isinstance(locations, dict) or not locations.get(object_name):
+        if (
+            not isinstance(object_locations, dict)
+            or not object_locations.get(object_type)
+        ):
             checks.skip(description, "final location is not in the world context")
             continue
         checks.record(
-            bool(set(locations[object_name]).intersection(expected)),
-            f"{description}, but it is at {locations[object_name]!r}",
+            bool(
+                set(object_locations[object_type]).intersection(
+                    expected_location_types
+                )
+            ),
+            f"{description}, but it is at {object_locations[object_type]!r}",
         )
     return checks
 
@@ -504,8 +508,8 @@ def _check_final_navigation(checks, case, observations):
     goals = case.goals()
     if not goals or goals[-1].get("action") != "NavigateAction":
         return
-    location = goals[-1].get("location")
-    description = f"navigation: arrived at {location!r}"
+    location = render(goals[-1].get("location"))
+    description = f"navigation: arrived at {location}"
 
     navigation = observations.get("navigation")
     if not isinstance(navigation, list) or not navigation:
@@ -513,22 +517,23 @@ def _check_final_navigation(checks, case, observations):
         return
     arrival = navigation[-1]
     checks.record(
-        field_matches(arrival.get("location"), location)
-        and arrival.get("success") is True,
+        arrival.get("location") == location and arrival.get("success") is True,
         description,
     )
 
 
 def _check_containers(checks, case, observations):
-    states = observations.get("container_states")
-    if not isinstance(states, dict):
+    container_states = observations.get("container_states")
+    if not isinstance(container_states, dict):
         return
-    left_open = _containers_left_open_on_purpose(case)
+    containers_left_open = _containers_left_open_on_purpose(case)
 
-    for container_name in sorted(states):
-        expected_state = "open" if container_name in left_open else "closed"
+    for container_name in sorted(container_states):
+        expected_state = (
+            "open" if container_name in containers_left_open else "closed"
+        )
         description = f"container: {container_name!r} is {expected_state}"
-        actual_state = states[container_name]
+        actual_state = container_states[container_name]
         if actual_state is None or actual_state == "unknown":
             checks.skip(description, "the container state could not be read")
             continue
@@ -536,8 +541,6 @@ def _check_containers(checks, case, observations):
 
 
 def _check_gripper(checks, case, observations):
-    """Objects the task says to hold must be held, and everything the robot put
-    down must actually have been let go."""
     held_objects = observations.get("held_objects")
     if not isinstance(held_objects, list):
         return
@@ -546,57 +549,47 @@ def _check_gripper(checks, case, observations):
     for object_name, action in sorted(final_actions.items()):
         if action == "PickUpAction":
             checks.record(
-                object_name in held_objects, f"gripper: {object_name!r} is held"
+                object_name in held_objects, f"gripper: {object_name} is held"
             )
 
     for goal in final_location_goals(case):
-        object_name = goal["object"]
+        object_name = render(goal["object"])
         if final_actions.get(object_name) == "PickUpAction":
             continue
         checks.record(
             object_name not in held_objects,
-            f"gripper: {object_name!r} was released",
+            f"gripper: {object_name} was released",
         )
 
 
 def _check_directions(checks, case, observations):
-    results = observations.get("directional_relations")
+    directional_results = observations.get("directional_relations")
     for goal in final_location_goals(case):
         if goal.get("relation") not in DIRECTIONAL_RELATIONS:
             continue
+        object_description = render(goal["object"])
+        location_description = render(goal["location"])
         description = (
-            f"direction: {goal['object']!r} is "
-            f"{goal['relation']} {goal['location']!r}"
+            f"direction: {object_description} is "
+            f"{goal['relation']} {location_description}"
         )
-        if not isinstance(results, list):
+        if not isinstance(directional_results, list):
             checks.skip(description, "no directional relation was observed")
             continue
 
-        # The last observation for this goal is the one that counts.
-        outcome = None
-        for result in reversed(results):
+        observed_success = None
+        for result in reversed(directional_results):
             if (
-                result.get("object") == goal["object"]
+                result.get("object") == object_description
                 and result.get("relation") == goal["relation"]
-                and field_matches(result.get("location"), goal["location"])
+                and result.get("location") == location_description
             ):
-                outcome = result.get("success")
+                observed_success = result.get("success")
                 break
-        if not isinstance(outcome, bool):
+        if not isinstance(observed_success, bool):
             checks.skip(description, "no directional relation was observed")
             continue
-        checks.record(outcome, description)
-
-
-def post_condition_failures(observations):
-    failures = []
-    for step in observations.get("steps", []):
-        if step.get("condition_ok") is not False:
-            continue
-        object_name = step.get("object")
-        target = f"({object_name})" if object_name else ""
-        failures.append(f"post-condition after {step['action']}{target}")
-    return failures
+        checks.record(observed_success, description)
 
 
 def empty_metrics():
@@ -610,18 +603,17 @@ def empty_metrics():
         "planned_goal_match": None,
         "attempts": None,
         "first_failed_check": None,
-        **_world_metrics(GoalChecks(), []),
+        **_world_metrics(GoalChecks()),
     }
 
 
-def _world_metrics(checks, post_conditions):
+def _world_metrics(checks):
     return {
         "world_goal_reached": checks.success,
         "world_checks_expected": checks.expected,
         "world_checks_evaluated": checks.checked,
         "world_failures": checks.errors,
         "world_unchecked": checks.unavailable,
-        "post_condition_failures": post_conditions,
     }
 
 
@@ -629,7 +621,7 @@ def verified_goal_metrics(case, final_context, observations):
     observations = observations if isinstance(observations, dict) else {}
     checks = location_checks(case, final_context)
     checks = checks.merged_with(physical_checks(case, observations))
-    return _world_metrics(checks, post_condition_failures(observations))
+    return _world_metrics(checks)
 
 
 def task_succeeded(
@@ -663,33 +655,47 @@ def validate_entities(case, context, label):
         return
     names = context_names(context)
     for step in steps:
-        for field_name, allowed_names in allowed_names_for_step(step, names).items():
-            value = step.get(field_name)
-            values = value if isinstance(value, list) else [value]
-            missing = [name for name in values if name and name not in allowed_names]
+        for field_name, allowed_types in allowed_names_for_step(step, names).items():
+            described = step.get(field_name)
+            if described is None:
+                continue
+            entity_types = [
+                item["type"]
+                for item in (described if isinstance(described, list) else [described])
+            ]
+            missing = [name for name in entity_types if name not in allowed_types]
             if missing:
                 raise ValueError(
                     f"{case.id}: {label} has no {field_name} {missing[0]!r}"
                 )
 
-        object_name = step.get("object")
-        source = step.get("source")
-        locations = context.get("object_locations", {}).get(object_name, [])
-        sources = source if isinstance(source, list) else [source]
-        if (
-            object_name in names.objects
-            and source
-            and not set(sources).intersection(locations)
-        ):
+        described_object = step.get("object")
+        described_source = step.get("source")
+        if described_object is None or described_source is None:
+            continue
+        object_type = described_object["type"]
+        source_types = {
+            item["type"]
+            for item in (
+                described_source
+                if isinstance(described_source, list)
+                else [described_source]
+            )
+        }
+        places = context.get("object_locations", {}).get(object_type, [])
+        if object_type in names.objects and not source_types.intersection(places):
             raise ValueError(
-                f"{case.id}: {label} source of {object_name!r} is "
-                f"{locations!r}, not {source!r}"
+                f"{case.id}: {label} source of {object_type!r} is "
+                f"{places!r}, not {sorted(source_types)!r}"
             )
 
 
 def covered_objects(cases):
     return {
-        goal["object"] for case in cases for goal in case.goals() if goal.get("object")
+        goal["object"]["type"]
+        for case in cases
+        for goal in case.goals()
+        if goal.get("object")
     }
 
 

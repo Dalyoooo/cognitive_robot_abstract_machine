@@ -40,67 +40,52 @@ SANITY_CASES = (
         "name": "Fridge source",
         "instruction": "bring the milk from the fridge to the table",
         "context": {
-            "objects": ["milk"],
-            "object_locations": {"milk": ["fridge"]},
-            "surfaces": ["table"],
-            "containers": ["fridge"],
-            "openables": ["fridge"],
+            "objects": ["Milk"],
+            "object_locations": {"Milk": ["Fridge"]},
+            "surfaces": ["Table"],
+            "containers": ["Fridge"],
+            "openables": ["Fridge"],
             "furniture": [],
-            "rooms": ["kitchen"],
-            "types": {
-                "milk": "Milk",
-                "table": "Table",
-                "fridge": "Fridge",
-                "kitchen": "Kitchen",
-            },
+            "rooms": ["Kitchen"],
+            "instances": {},
         },
         "container_actions": {"OpenAction", "CloseAction"},
-        "source": "fridge",
-        "destination": "table",
+        "source": "Fridge",
+        "destination": "Table",
     },
     {
         "name": "Fridge source rephrase",
         "instruction": "fetch the milk from the fridge and place it on the table",
         "context": {
-            "objects": ["milk"],
-            "object_locations": {"milk": ["fridge"]},
-            "surfaces": ["table"],
-            "containers": ["fridge"],
-            "openables": ["fridge"],
+            "objects": ["Milk"],
+            "object_locations": {"Milk": ["Fridge"]},
+            "surfaces": ["Table"],
+            "containers": ["Fridge"],
+            "openables": ["Fridge"],
             "furniture": [],
-            "rooms": ["kitchen"],
-            "types": {
-                "milk": "Milk",
-                "table": "Table",
-                "fridge": "Fridge",
-                "kitchen": "Kitchen",
-            },
+            "rooms": ["Kitchen"],
+            "instances": {},
         },
         "container_actions": {"OpenAction", "CloseAction"},
-        "source": "fridge",
-        "destination": "table",
+        "source": "Fridge",
+        "destination": "Table",
     },
     {
         "name": "surface transport",
         "instruction": "move the milk from the counter to the table",
         "context": {
-            "objects": ["milk"],
-            "object_locations": {"milk": ["counter"]},
-            "surfaces": ["counter", "table"],
+            "objects": ["Milk"],
+            "object_locations": {"Milk": ["CounterTop"]},
+            "surfaces": ["CounterTop", "Table"],
             "containers": [],
             "openables": [],
             "furniture": [],
-            "rooms": ["kitchen"],
-            "types": {
-                "milk": "Milk",
-                "counter": "CounterTop",
-                "table": "Table",
-                "kitchen": "Kitchen",
-            },
+            "rooms": ["Kitchen"],
+            "instances": {},
         },
         "container_actions": set(),
-        "source": "counter",
-        "destination": "table",
+        "source": "CounterTop",
+        "destination": "Table",
     },
 )
 
@@ -129,11 +114,15 @@ def _sanity_transport(plan, case):
     transports = [
         step for step in plan["plan"] if step.get("action") == "TransportAction"
     ]
+
+    def named(description):
+        return description["type"] if isinstance(description, dict) else description
+
     matches = (
-        transports[0].get("object"),
-        transports[0].get("source"),
-        transports[0].get("location"),
-    ) == ("milk", case["source"], case["destination"])
+        named(transports[0].get("object")),
+        named(transports[0].get("source")),
+        named(transports[0].get("location")),
+    ) == ("Milk", case["source"], case["destination"])
     if len(transports) != 1 or not matches:
         raise SanityCheckError(
             f"{case['name']} failed: expected one matching TransportAction."

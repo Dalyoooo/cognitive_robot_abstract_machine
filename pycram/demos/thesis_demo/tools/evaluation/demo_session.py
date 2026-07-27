@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pycram.datastructures.dataclasses import Context
 
 from thesis_demo.execution.execution import run_plan_as_result
-from thesis_demo.planner.world_context import PlannerNames, build_world_context
+from thesis_demo.planner.world_context import build_world_context
 from thesis_demo.world.nlp_demo import start_visualization, build_world_model
 
 
@@ -30,7 +30,6 @@ class DemoSession:
     robot: object = None
     demo_context: object = None
     visualization_node: object = None
-    names: object = None
     pristine: object = None
     pristine_key: tuple = None
     result: dict = field(default=None)
@@ -44,21 +43,18 @@ class DemoSession:
         self.world = deepcopy(pristine_world)
         self.robot = _copied_robot_view(self.world, pristine_robot)
         self.demo_context = Context(world=self.world, robot=self.robot)
-        self.demo_context.evaluate_conditions = False
         self.visualization_node = (
             start_visualization(self.world) if self.visualize else None
         )
-        self.names = PlannerNames.build(self.world)
 
     def context(self):
-        return build_world_context(self.world, self.robot, self.names)
+        return build_world_context(self.world, self.robot)
 
     def execute_plan(self, plan_dict, step_callback=None):
         self.result = run_plan_as_result(
             self.demo_context,
             plan_dict.get("plan", []),
             step_callback=step_callback,
-            names=self.names,
         )
 
     def execution_result(self):
@@ -71,5 +67,4 @@ class DemoSession:
         self.robot = None
         self.demo_context = None
         self.visualization_node = None
-        self.names = None
         self.result = None

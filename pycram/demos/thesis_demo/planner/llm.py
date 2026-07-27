@@ -18,7 +18,7 @@ from thesis_demo.validation.schema import parse_clarification, parse_plan
 @dataclass(frozen=True)
 class InferenceConfiguration:
     seed: int = 0
-    temperature: float = 0.0
+    temperature: float = 0.1
     max_tokens: int = -1  # -1: generate until EOS
     base_seed: int | None = None
     max_attempts: int = 1

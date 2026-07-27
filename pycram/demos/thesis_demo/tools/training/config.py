@@ -121,13 +121,13 @@ def parse_args():
     parser.add_argument("--lora-r", type=int, default=8)
     parser.add_argument("--lora-alpha", type=int, default=16)
     parser.add_argument("--lora-dropout", type=float, default=0.05)
-    parser.add_argument("--max-seq-len", type=int, default=4096)
+    parser.add_argument("--max-seq-len", type=int, default=8192)
     parser.add_argument("--warmup-steps", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--eval-steps",
         type=int,
-        default=50,
+        default=25,
         help="Evaluate validation loss every N steps (0 = once per epoch)",
     )
     parser.add_argument("--save-steps", type=int, default=0)

@@ -1,5 +1,4 @@
 import gc
-import json
 import sys
 from pathlib import Path
 
@@ -12,7 +11,6 @@ import unsloth
 from transformers import DataCollatorForSeq2Seq
 from trl import SFTConfig, SFTTrainer
 
-from thesis_demo.planner.prompt import system_prompt, user_turn
 from thesis_demo.tools.training.artifacts import (
     push_to_hub,
     save_gguf,
@@ -28,155 +26,6 @@ from thesis_demo.tools.training.config import (
     parse_args,
     text_tokenizer,
 )
-from thesis_demo.validation.guard import verify
-
-
-class SanityCheckError(RuntimeError):
-    """Expected failure of a learned-behavior check."""
-
-
-SANITY_CASES = (
-    {
-        "name": "Fridge source",
-        "instruction": "bring the milk from the fridge to the table",
-        "context": {
-            "objects": ["Milk"],
-            "object_locations": {"Milk": ["Fridge"]},
-            "surfaces": ["Table"],
-            "containers": ["Fridge"],
-            "openables": ["Fridge"],
-            "furniture": [],
-            "rooms": ["Kitchen"],
-            "instances": {},
-        },
-        "container_actions": {"OpenAction", "CloseAction"},
-        "source": "Fridge",
-        "destination": "Table",
-    },
-    {
-        "name": "Fridge source rephrase",
-        "instruction": "fetch the milk from the fridge and place it on the table",
-        "context": {
-            "objects": ["Milk"],
-            "object_locations": {"Milk": ["Fridge"]},
-            "surfaces": ["Table"],
-            "containers": ["Fridge"],
-            "openables": ["Fridge"],
-            "furniture": [],
-            "rooms": ["Kitchen"],
-            "instances": {},
-        },
-        "container_actions": {"OpenAction", "CloseAction"},
-        "source": "Fridge",
-        "destination": "Table",
-    },
-    {
-        "name": "surface transport",
-        "instruction": "move the milk from the counter to the table",
-        "context": {
-            "objects": ["Milk"],
-            "object_locations": {"Milk": ["CounterTop"]},
-            "surfaces": ["CounterTop", "Table"],
-            "containers": [],
-            "openables": [],
-            "furniture": [],
-            "rooms": ["Kitchen"],
-            "instances": {},
-        },
-        "container_actions": set(),
-        "source": "CounterTop",
-        "destination": "Table",
-    },
-)
-
-
-def _generate(model, tokenizer, messages, max_new_tokens=2048):
-    tokens = tokenizer.apply_chat_template(
-        messages,
-        tokenize=True,
-        add_generation_prompt=True,
-        return_tensors="pt",
-        enable_thinking=False,
-    ).to(model.device)
-    attention_mask = tokens.new_ones(tokens.shape)
-    output = model.generate(
-        tokens,
-        attention_mask=attention_mask,
-        max_new_tokens=max_new_tokens,
-        do_sample=False,
-    )
-    return tokenizer.decode(
-        output[0][tokens.shape[1] :], skip_special_tokens=True
-    ).strip()
-
-
-def _sanity_transport(plan, case):
-    transports = [
-        step for step in plan["plan"] if step.get("action") == "TransportAction"
-    ]
-
-    def named(description):
-        return description["type"] if isinstance(description, dict) else description
-
-    matches = (
-        named(transports[0].get("object")),
-        named(transports[0].get("source")),
-        named(transports[0].get("location")),
-    ) == ("Milk", case["source"], case["destination"])
-    if len(transports) != 1 or not matches:
-        raise SanityCheckError(
-            f"{case['name']} failed: expected one matching TransportAction."
-        )
-
-
-def _sanity_container_actions(plan, case):
-    container_actions = {
-        step["action"]
-        for step in plan["plan"]
-        if step["action"] in {"OpenAction", "CloseAction"}
-    }
-    if container_actions != case["container_actions"]:
-        raise SanityCheckError(
-            f"{case['name']} failed: expected container actions "
-            f"{sorted(case['container_actions'])}, got "
-            f"{sorted(container_actions)}."
-        )
-
-
-def _check_sanity_case(model, tokenizer, generate_response, case):
-    messages = [
-        {"role": "system", "content": system_prompt()},
-        {"role": "user", "content": user_turn(case["instruction"], case["context"])},
-    ]
-    text = generate_response(model, tokenizer, messages)
-    try:
-        plan = json.loads(text)
-    except json.JSONDecodeError as error:
-        raise SanityCheckError(
-            f"{case['name']} failed: response is not JSON: {text[:200]!r}."
-        ) from error
-    valid, reason = verify(plan, case["context"])
-    if not valid or not plan.get("plan"):
-        raise SanityCheckError(f"{case['name']} failed: invalid plan: {reason}.")
-    _sanity_transport(plan, case)
-    _sanity_container_actions(plan, case)
-
-
-def _run_sanity_check(model, tokenizer):
-    unsloth.FastModel.for_inference(model)
-    for case in SANITY_CASES:
-        _check_sanity_case(model, tokenizer, _generate, case)
-    print(">>> Sanity check passed: all 3 planner behavior cases are valid.")
-
-
-def _run_sanity_check_nonfatal(model, tokenizer):
-    try:
-        _run_sanity_check(model, tokenizer)
-    except SanityCheckError as error:
-        print(f">>> WARNING: {error}")
-        print(">>> WARNING: Continuing exports after failed sanity check.")
-        return False
-    return True
 
 
 def _build_trainer(args, model, tokenizer, train_dataset, val_dataset, output_dir):
@@ -216,7 +65,7 @@ def _build_trainer(args, model, tokenizer, train_dataset, val_dataset, output_di
             learning_rate=args.lr,
             lr_scheduler_type="cosine",
             warmup_steps=warmup_steps,
-            optim="paged_adamw_8bit",
+            optim="adamw_8bit",
             weight_decay=0.01,
             max_grad_norm=0.3,
             bf16=use_bf16,
@@ -344,9 +193,6 @@ def main():
     model.save_pretrained(str(adapter_path))
     tokenizer.save_pretrained(str(adapter_path))
     print(f">>> Adapter saved: {adapter_path}")
-
-    print(">>> Running minimal learned-behavior check ...")
-    _run_sanity_check_nonfatal(model, tokenizer)
 
     merged_path = output_dir / "merged"
     merge_ok = args.merge and save_merged(

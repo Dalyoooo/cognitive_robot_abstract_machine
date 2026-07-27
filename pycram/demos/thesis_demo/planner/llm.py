@@ -87,8 +87,10 @@ def setup_planner(
 
 
 def load_planner():
-    gguf_model = os.environ.get("PLANNER_GGUF_MODEL", "wijan/action-planner-gguf")
-    gguf_file = os.environ.get("PLANNER_GGUF_FILE", "qwen2.5-3b-instruct.Q4_K_M.gguf")
+    gguf_model = os.environ.get("PLANNER_GGUF_MODEL", "wijan/Robot-Action-Planner-GGUF")
+    gguf_file = os.environ.get(
+        "PLANNER_GGUF_FILE", "meta-llama-3.1-8b-instruct.Q4_K_M.gguf"
+    )
     setup_planner(gguf_model, gguf_file)
 
 

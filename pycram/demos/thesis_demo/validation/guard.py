@@ -216,10 +216,17 @@ def _describes_entities(
         )
 
     instances = context.get("instances", {}).get(entity_type)
+    qualifiers = {key: value for key, value in description.items() if key != "type"}
     if not instances:
+        # No offered qualifier set means the world holds this type once, so a
+        # qualifier cannot have been copied from the context; it was invented.
+        if qualifiers:
+            return (
+                f"{entity_type} occurs once and takes no qualifier; "
+                f"drop {qualifiers!r}"
+            )
         return None
 
-    qualifiers = {key: value for key, value in description.items() if key != "type"}
     matching_instances = [
         instance
         for instance in instances

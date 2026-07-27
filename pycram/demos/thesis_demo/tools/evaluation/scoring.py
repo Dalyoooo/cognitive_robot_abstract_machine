@@ -21,6 +21,7 @@ OUTCOMES = {"plan", "clarification"}
 
 MAIN_METRICS = (
     "planning_success",
+    "reference_goal_success",
     "reachability_success",
     "execution_success",
     "task_success",
@@ -212,6 +213,7 @@ class LiveResult:
 def _metric_value(result, name):
     values = {
         "planning_success": result.planning_success,
+        "reference_goal_success": result.metrics.get("planned_goal_match"),
         "reachability_success": result.reachability_success,
         "execution_success": result.execution_success,
         "task_success": result.task_success,
@@ -290,7 +292,11 @@ def _step_matches(step, reference):
 
 def field_matches(actual, expected):
     if isinstance(expected, list):
-        return actual in expected
+        return any(field_matches(actual, option) for option in expected)
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        # A reference description states the minimum a plan has to say about an
+        # entity. Naming the same entity more precisely still reaches the goal.
+        return all(actual.get(key) == value for key, value in expected.items())
     return actual == expected
 
 
@@ -315,10 +321,16 @@ def _reference_satisfied(steps, expected):
         if key in expected
     }
     destination = any(_step_matches(step, goal) for step in steps)
+    # An unnamed source is a choice the plan hands to the execution, not a wrong
+    # goal; the guard is what decides when naming it is mandatory. Naming a
+    # different source than the reference is still a miss.
     source = "source" not in expected or any(
         isinstance(step, dict)
-        and step.get("object") == expected.get("object")
-        and field_matches(step.get("source"), expected["source"])
+        and field_matches(step.get("object"), expected.get("object"))
+        and (
+            step.get("source") is None
+            or field_matches(step.get("source"), expected["source"])
+        )
         for step in steps
     )
     return destination and source
@@ -373,18 +385,21 @@ class FailedCheck(StrEnum):
 
 
 def first_failed_check(metrics, reachability_success, execution_success):
-    gates = (
+    gates = [
         (FailedCheck.JSON_OBJECT, metrics.get("json_object_valid")),
         (FailedCheck.SCHEMA, metrics.get("schema_valid")),
         (FailedCheck.NAMES, metrics.get("names_valid")),
         (FailedCheck.SEQUENCE, metrics.get("sequence_valid")),
         (FailedCheck.OUTCOME, metrics.get("outcome_match")),
         (FailedCheck.CLARIFICATION_TARGET, metrics.get("clarification_target_match")),
-        (FailedCheck.PLANNED_GOAL, metrics.get("planned_goal_match")),
         (FailedCheck.REACHABILITY, reachability_success),
         (FailedCheck.EXECUTION, execution_success),
         (FailedCheck.WORLD_GOAL, metrics.get("world_goal_reached")),
-    )
+    ]
+    if metrics.get("world_goal_reached") is None:
+        # The plan text is only evidence of the goal while the world offers no
+        # observation of it. Once it does, the world has the last word.
+        gates.append((FailedCheck.PLANNED_GOAL, metrics.get("planned_goal_match")))
     for gate, passed in gates:
         if passed is False:
             return gate.value

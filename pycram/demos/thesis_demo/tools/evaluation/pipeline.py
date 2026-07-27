@@ -170,12 +170,9 @@ def _assess_planner_response(case, outcome, payload, metadata):
         and quality["sequence_valid"] is not False
     ):
         error = "planner response failed schema or guard validation"
-    elif (
-        error is None
-        and case.expected_outcome == "plan"
-        and quality["planned_goal_match"] is not True
-    ):
-        error = "planner response does not contain the expected symbolic goal"
+    # A missed reference goal is deliberately not an error here. A task goal is
+    # not tied to one action sequence, so a guard-valid plan has to reach the
+    # executor and let the observed world state decide whether it succeeded.
     return quality, error
 
 

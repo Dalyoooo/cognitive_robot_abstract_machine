@@ -1,0 +1,10 @@
+metric,base_successes,base_observed_cases,base_total_cases,base_stage_percent,base_benchmark_percent,finetuned_successes,finetuned_observed_cases,finetuned_total_cases,finetuned_stage_percent,finetuned_benchmark_percent,stage_difference_percentage_points,benchmark_difference_percentage_points
+planning_success,4,30,30,13.3,13.3,18,30,30,60,60,46.7,46.7
+reference_goal_success,3,20,30,15,10,13,24,30,54.2,43.3,39.2,33.3
+reachability_success,4,4,30,100,13.3,18,18,30,100,60,0,46.7
+execution_success,4,4,30,100,13.3,18,18,30,100,60,0,46.7
+task_success,3,4,30,75,10,13,18,30,72.2,43.3,-2.8,33.3
+clarification_asked,0,10,30,0,0,6,10,30,60,20,60,20
+clarification_target_correct_raw,0,10,30,0,0,4,10,30,40,13.3,40,13.3
+clarification_target_correct_adjudicated,0,10,30,0,0,5,10,30,50,16.7,50,16.7
+clarification_task_success,0,10,30,0,0,3,10,30,30,10,30,10

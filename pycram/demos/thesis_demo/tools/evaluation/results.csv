@@ -1,0 +1,61 @@
+id,model_variant,evaluation_mode,expected_outcome,planner_outcome,planning_success,reachability_success,execution_success,task_success,execution_status,timed_out,failure_stage,error,planning_latency_s,execution_latency_s,total_latency_s,clarification_asked,clarification_target_match_raw,clarification_target_match,clarification_adjudicated
+001,base,end_to_end,plan,plan,TRUE,TRUE,TRUE,FALSE,goal_mismatch,FALSE,goal_verification,not satisfied: navigation: arrived at Sink,63.14138074799848,2.119599716999801,74.45389691500168,,,,
+002,base,end_to_end,plan,plan,TRUE,TRUE,TRUE,TRUE,ok,FALSE,,,24.252802433009492,1.8157028569985416,30.449062147992663,,,,
+003,base,end_to_end,plan,plan,TRUE,TRUE,TRUE,TRUE,ok,FALSE,,,30.939277194003807,4.0402244279976,39.29527820200019,,,,
+004,base,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,52.46193724499608,0,56.625557563005714,,,,
+005,base,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: Fridge occurs once and takes no qualifier; drop {'contains': None},28.148311647004448,0,32.14202312400448,,,,
+006,base,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,41.78781791300571,0,46.033340117006446,,,,
+007,base,end_to_end,plan,plan,TRUE,TRUE,TRUE,TRUE,ok,FALSE,,,41.80909674400755,7.2633155479998095,53.22322817699751,,,,
+008,base,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,50.7544045530085,0,54.88016755400167,,,,
+009,base,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: Output must be exactly one JSON object.,46.27088681700115,0,50.177529921988025,,,,
+010,base,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,"planner validation failed: object has unknown qualifier(s) ['instances']; valid: at, contains",51.841746477002744,0,55.97209783300059,,,,
+011,base,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,67.13525404299435,0,71.24467242800165,,,,
+012,base,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,48.58251723200374,0,52.70031661599933,,,,
+013,base,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,42.232413746998645,0,46.24458036200667,,,,
+014,base,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,47.71013066700834,0,51.96621739798866,,,,
+015,base,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,65.6222102590109,0,69.9519533040002,,,,
+016,base,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,104.64124067800005,0,109.13243146000605,,,,
+017,base,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,"planner validation failed: location has unknown qualifier(s) ['relation']; valid: at, contains",120.5559663180029,0,125.26889671600657,,,,
+018,base,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,82.23994488400058,0,86.90277403801156,,,,
+019,base,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,106.18236736000108,0,110.42493233700225,,,,
+020,base,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,79.95090706300107,0,84.26014953800768,,,,
+021,base,end_to_end,clarification,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: NavigateAction requires 'source' to be null,24.53631514700828,0,28.576238330992055,FALSE,FALSE,FALSE,FALSE
+022,base,end_to_end,clarification,error,FALSE,,,,not_attempted,FALSE,planning,"planner validation failed: PlaceAction relation must be one of: behind, in_front_of, inside, left_of, on, right_of",31.3512270640058,0,35.35795413800224,FALSE,FALSE,FALSE,FALSE
+023,base,end_to_end,clarification,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,40.35933820500213,0,44.453514908993384,FALSE,FALSE,FALSE,FALSE
+024,base,end_to_end,clarification,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,56.191819915009546,0,60.56331053499889,FALSE,FALSE,FALSE,FALSE
+025,base,end_to_end,clarification,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: Output must be exactly one JSON object.,56.72916696200264,0,60.834225661994424,FALSE,FALSE,FALSE,FALSE
+026,base,end_to_end,clarification,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,49.82735625701025,0,53.87738833899493,FALSE,FALSE,FALSE,FALSE
+027,base,end_to_end,clarification,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,49.04635742800019,0,53.02999167700182,FALSE,FALSE,FALSE,FALSE
+028,base,end_to_end,clarification,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,50.890520782006206,0,54.852864878004766,FALSE,FALSE,FALSE,FALSE
+029,base,end_to_end,clarification,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: TransportAction requires a 'location' (where to go/place),57.56202762600151,0,61.90716530100326,FALSE,FALSE,FALSE,FALSE
+030,base,end_to_end,clarification,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: PickUpAction requires 'location' to be null,61.344330644002184,0,65.4143065810058,FALSE,FALSE,FALSE,FALSE
+001,finetuned,end_to_end,plan,plan,TRUE,TRUE,TRUE,TRUE,ok,FALSE,,,84.22598001200822,5.482945159004885,93.9683156490064,,,,
+002,finetuned,end_to_end,plan,plan,TRUE,TRUE,TRUE,TRUE,ok,FALSE,,,29.243247161008185,2.56160900699615,35.92958328900568,,,,
+003,finetuned,end_to_end,plan,plan,TRUE,TRUE,TRUE,TRUE,ok,FALSE,,,34.867034678012715,4.461255385002005,43.641867204991286,,,,
+004,finetuned,end_to_end,plan,plan,TRUE,TRUE,TRUE,TRUE,ok,FALSE,,,80.2447500010021,18.61721694500011,103.548333498009,,,,
+005,finetuned,end_to_end,plan,plan,TRUE,TRUE,TRUE,TRUE,ok,FALSE,,,41.72330424901156,5.3998318719968665,51.17756870300218,,,,
+006,finetuned,end_to_end,plan,plan,TRUE,TRUE,TRUE,TRUE,ok,FALSE,,,32.40115350599808,6.413681835998432,43.24106698199466,,,,
+007,finetuned,end_to_end,plan,plan,TRUE,TRUE,TRUE,TRUE,ok,FALSE,,,38.09985852999671,7.320941312005743,49.58101470400288,,,,
+008,finetuned,end_to_end,plan,plan,TRUE,TRUE,TRUE,FALSE,goal_mismatch,FALSE,goal_verification,direction: MustardBottle is left_of Kettle: no directional relation was observed,56.80371690099128,19.56770962900191,80.49469441299152,,,,
+009,finetuned,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,"planner validation failed: unknown location type 'WineBottle', choose from: Drawer, Fridge, Kitchen, KitchenIsland, Oven, Sink, SinkCounter, Table, TrashCan",43.19384227899718,0,47.11716694099596,,,,
+010,finetuned,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,"planner validation failed: unknown location type 'Kettle', choose from: Drawer, Fridge, Kitchen, KitchenIsland, Oven, Sink, SinkCounter, Table, TrashCan",44.53535845399893,0,48.647805847998825,,,,
+011,finetuned,end_to_end,plan,plan,TRUE,TRUE,TRUE,FALSE,goal_mismatch,FALSE,goal_verification,direction: TomatoSoup is behind WineBottle: no directional relation was observed,57.25687407499936,21.401470833006897,82.94542663400352,,,,
+012,finetuned,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: TransportAction(CheezeIt) while the gripper already holds something,54.93891453598917,0,58.86973353198846,,,,
+013,finetuned,end_to_end,plan,plan,TRUE,TRUE,TRUE,TRUE,ok,FALSE,,,43.47959605099459,13.072544611000922,60.7771836299944,,,,
+014,finetuned,end_to_end,plan,plan,TRUE,TRUE,TRUE,TRUE,ok,FALSE,,,43.56788369000424,11.522006826999132,59.31957573200634,,,,
+015,finetuned,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: TransportAction(source=Fridge) without preceding OpenAction,53.3936083370063,0,57.44656815099006,,,,
+016,finetuned,end_to_end,plan,plan,TRUE,TRUE,TRUE,FALSE,goal_mismatch,FALSE,goal_verification,"not satisfied: location: SaltContainer is at one of ['Table'], but it is at ['Drawer']",72.25722482299898,30.438679079001304,106.86888300399004,,,,
+017,finetuned,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,planner validation failed: container Drawer(contains=TunaCan) must be closed after access,90.06562545000634,0,94.01736251899274,,,,
+018,finetuned,end_to_end,plan,plan,TRUE,TRUE,TRUE,TRUE,ok,FALSE,,,82.58110907999799,61.137884380004834,148.19048945599934,,,,
+019,finetuned,end_to_end,plan,error,FALSE,,,,not_attempted,FALSE,planning,"planner validation failed: unknown location type 'Kettle', choose from: Drawer, Fridge, Kitchen, KitchenIsland, Oven, Sink, SinkCounter, Table, TrashCan",137.1621569370036,0,141.06029700799263,,,,
+020,finetuned,end_to_end,plan,plan,TRUE,TRUE,TRUE,FALSE,goal_mismatch,FALSE,goal_verification,"not satisfied: location: Spoon is at one of ['KitchenIsland'], but it is at ['Drawer']",50.30344777999562,26.37995023198891,80.87629020299937,,,,
+021,finetuned,end_to_end,clarification,plan,FALSE,,,,not_attempted,FALSE,planning,"expected outcome 'clarification', got 'plan'",46.46329668100225,0,50.3827464490023,FALSE,FALSE,FALSE,FALSE
+022,finetuned,end_to_end,clarification,clarification,FALSE,,,,not_attempted,FALSE,planning,clarification question did not match the expected target,23.01522939899587,0,27.069955747996573,TRUE,FALSE,FALSE,FALSE
+023,finetuned,end_to_end,clarification,clarification,TRUE,TRUE,TRUE,TRUE,ok,FALSE,,,92.28121255298902,21.07012573799875,117.558058953,TRUE,TRUE,TRUE,FALSE
+024,finetuned,end_to_end,clarification,plan,FALSE,,,,not_attempted,FALSE,planning,"expected outcome 'clarification', got 'plan'",76.64714695099974,0,80.60497788598877,FALSE,FALSE,FALSE,FALSE
+025,finetuned,end_to_end,clarification,clarification,TRUE,TRUE,TRUE,FALSE,goal_mismatch,FALSE,goal_verification,"not satisfied: location: GelatinBox(at=KitchenIsland) is at one of ['Table'], but it is at ['SinkCounter']",64.71263797700522,6.905216167011531,76.9878844180057,TRUE,TRUE,TRUE,FALSE
+026,finetuned,end_to_end,clarification,clarification,TRUE,TRUE,TRUE,TRUE,ok,FALSE,,,95.90841502101102,19.46220600300876,119.47746159299275,TRUE,TRUE,TRUE,FALSE
+027,finetuned,end_to_end,clarification,clarification,TRUE,TRUE,TRUE,TRUE,ok,FALSE,,,85.28349306798191,13.892500682995887,103.56040341300832,TRUE,TRUE,TRUE,FALSE
+028,finetuned,end_to_end,clarification,error,FALSE,,,,not_attempted,FALSE,planning,"planner validation failed: unknown location type 'WineBottle', choose from: Drawer, Fridge, Kitchen, KitchenIsland, Oven, Sink, SinkCounter, Table, TrashCan",75.3422507350042,0,79.36886652700196,FALSE,FALSE,FALSE,FALSE
+029,finetuned,end_to_end,clarification,clarification,FALSE,,,,not_attempted,FALSE,planning,clarification question did not match the expected target,24.705259672002285,0,29.10705261999101,TRUE,FALSE,TRUE,TRUE
+030,finetuned,end_to_end,clarification,error,FALSE,,,,not_attempted,FALSE,planning,"planner validation failed: unknown location type 'Kettle', choose from: Drawer, Fridge, Kitchen, KitchenIsland, Oven, Sink, SinkCounter, Table, TrashCan",75.71694655400643,0,80.06615501400665,FALSE,FALSE,FALSE,FALSE

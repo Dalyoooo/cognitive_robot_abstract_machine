@@ -10,12 +10,13 @@ who anyone is, and no speaker is known in advance.
 """
 
 from __future__ import annotations
+import os
+import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 import librosa
 import numpy as np
 from thesis_demo.audio.vad import SAMPLING_RATE
-import torch
-from speechbrain.inference.speaker import EncoderClassifier
 
 # Cosine-distance thresholds below which two segments count as the same voice.
 # These are starting points, not settled values: the right cut depends on the
@@ -49,6 +50,19 @@ def mfcc_embedding(samples, sampling_rate=SAMPLING_RATE):
     return _normalize(embedding)
 
 
+def ecapa_model_dir(source):
+    """Where the ECAPA weights live locally.
+
+    ``ECAPA_MODEL_DIR`` lets a deployment point at a directory populated when the
+    image was built, so a container does not download the model again in every
+    session. Without it the weights land in a temporary directory.
+    """
+    configured = os.environ.get("ECAPA_MODEL_DIR")
+    if configured:
+        return configured
+    return str(Path(tempfile.gettempdir()) / source.replace("/", "_"))
+
+
 def ecapa_embedding_backend(source="speechbrain/spkrec-ecapa-voxceleb"):
     """Build an ECAPA-TDNN embedding function; needs speechbrain installed.
 
@@ -56,10 +70,14 @@ def ecapa_embedding_backend(source="speechbrain/spkrec-ecapa-voxceleb"):
     which is what makes it robust where the MFCC baseline is weak: shouting,
     emotion, and short segments. It runs locally once downloaded.
     """
+    # Imported here, not at module level: speechbrain and torch are only needed
+    # for this backend, so the MFCC baseline keeps working without them.
+    import torch
+    from speechbrain.inference.speaker import EncoderClassifier
 
     encoder = EncoderClassifier.from_hparams(
         source=source,
-        savedir=f"/tmp/{source.replace('/', '_')}",
+        savedir=ecapa_model_dir(source),
     )
 
     def embed(samples, sampling_rate=SAMPLING_RATE):

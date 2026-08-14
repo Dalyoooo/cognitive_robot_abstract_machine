@@ -61,11 +61,10 @@ def system_prompt():
 
 
 def _as_one_quoted_line(text):
-    """Keep a transcript inside its own quoted entry, on a single line.
+    """Escape a transcript so it stays inside its own quoted entry, on one line.
 
-    Recognised speech is untrusted text: an unescaped quote followed by a line
-    break would otherwise render as a further ``[i] "..."`` entry and invent an
-    utterance nobody said.
+    .. note:: Recognised speech is untrusted text, so a quote or a line break in
+        it must not be able to close the entry or start another.
     """
     escaped = text.replace("\\", "\\\\").replace('"', '\\"')
     return " ".join(escaped.split())

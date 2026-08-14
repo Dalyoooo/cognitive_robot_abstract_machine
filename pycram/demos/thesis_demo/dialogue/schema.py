@@ -1,92 +1,176 @@
-"""Checks the model's answer and works out the numbers it implies.
+"""Validation and arithmetic for a scene interpretation.
 
-An interpretation says which utterance is the command, which of the others
-change what the robot should do, and which are ignored. ``parse_interpretation``
-accepts it only if the shape is exact, every index exists, every object type
-appears in the world context, and each utterance got exactly one role.
-
-``aggregate`` then adds up the changes in how many of something is needed, and
-``fuse`` writes the single instruction that goes to the planner. Counting
-happens here in Python rather than in the prompt, so the planner is handed one
-number instead of several remarks to add up.
+An interpretation names which utterance is the command, which others change what
+the robot should do, and which are ignored. :func:`parse_interpretation` accepts
+one only if its shape is exact, every index exists, every object type appears in
+the world context, and every utterance carries exactly one role.
+:func:`aggregate` sums the changes in how many of something is needed, and
+:func:`fuse` writes the instruction handed to the planner.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 
-# The answer must carry exactly these four keys, no more and no fewer.
-INTERPRETATION_KEYS = {"command", "quantity", "context", "ignore"}
-CONTEXT_ITEM_KEYS = {"utterance", "effect", "object", "delta"}
-QUANTITY_KEYS = {"object", "count"}
+from typing_extensions import Protocol
 
-# A household scene never legitimately shifts a count by more than this, so a
-# wilder number is a model slip rather than something to act on.
+# %% the utterance contract the dialogue stage relies on
+
+
+class SpokenUtterance(Protocol):
+    """What this module needs to know about one heard utterance."""
+
+    text: str
+    """The recognised words."""
+
+    speaker_id: int | None
+    """Which voice said it, or None when voices were not told apart."""
+
+
+# %% vocabulary of the interpretation payload
+
+
+class InterpretationKey(StrEnum):
+    """Top-level keys of an interpretation."""
+
+    COMMAND = "command"
+    QUANTITY = "quantity"
+    CONTEXT = "context"
+    IGNORE = "ignore"
+
+
+class ContextItemKey(StrEnum):
+    """Keys of one entry under :attr:`InterpretationKey.CONTEXT`."""
+
+    UTTERANCE = "utterance"
+    EFFECT = "effect"
+    OBJECT = "object"
+    DELTA = "delta"
+
+
+class QuantityKey(StrEnum):
+    """Keys of one entry under :attr:`InterpretationKey.QUANTITY`."""
+
+    OBJECT = "object"
+    COUNT = "count"
+
+
+class UtteranceRole(StrEnum):
+    """The part one utterance plays in the scene."""
+
+    COMMAND = "command"
+    CONTEXT = "context"
+    IGNORED = "ignored"
+
+
+INTERPRETATION_KEYS = frozenset(InterpretationKey)
+CONTEXT_ITEM_KEYS = frozenset(ContextItemKey)
+QUANTITY_KEYS = frozenset(QuantityKey)
+
 MAX_ABS_DELTA = 20
+"""Largest change in a count a single utterance may claim."""
+
 MAX_COUNT = 100
+"""Largest number of one object type a command may ask for."""
+
+
+# %% parsed interpretation
 
 
 @dataclass(frozen=True)
 class QuantityRequest:
     """How many of one object type the command itself asks for."""
 
-    object: str
+    object_type: str
+    """Type name as spelled in the world context."""
+
     count: int
+    """Number the command asks for."""
 
 
 @dataclass(frozen=True)
 class ContextItem:
-    """A background utterance kept because it changes the command's outcome.
-
-    ``object`` and ``delta`` are set only for utterances that change *how many*
-    of something is needed; they are counted symbolically instead of being left
-    to the planner's arithmetic. Constraints that change something else (a
-    destination, a substitution) carry ``effect`` alone.
-    """
+    """A background utterance kept because it changes the command's outcome."""
 
     utterance: int
+    """Index of the utterance in the scene."""
+
     effect: str
-    object: str | None = None
+    """How the task changes, as one clause the planner can act on."""
+
+    object_type: str | None = None
+    """Type whose required number changes, or None for any other change."""
+
     delta: int | None = None
+    """Change in that number, negative for fewer, or None."""
 
     @property
-    def is_quantitative(self):
-        return self.object is not None and self.delta is not None
+    def is_quantitative(self) -> bool:
+        """Whether this item changes *how many* of something is needed."""
+        return self.object_type is not None and self.delta is not None
 
 
 @dataclass(frozen=True)
 class Interpretation:
     """How a recorded scene splits into command, relevant context and noise.
 
-    Every utterance index of the scene appears exactly once across ``command``,
-    ``context`` and ``ignore`` -- nothing heard is silently dropped or counted
-    twice. ``command`` is None only when no utterance addresses the robot.
+    Every utterance index appears exactly once across :attr:`command`,
+    :attr:`context` and :attr:`ignore`.
     """
 
     command: int | None
+    """Index of the commanding utterance, or None when none addresses the robot."""
+
     context: tuple[ContextItem, ...]
+    """Background utterances that change the command's outcome."""
+
     ignore: tuple[int, ...]
+    """Indices of utterances that do not affect the task."""
+
     quantity: tuple[QuantityRequest, ...] = ()
+    """Numbers the command itself asks for, empty when it names none."""
+
+    def role_of(self, utterance: int) -> UtteranceRole:
+        """Return the part the utterance at this index plays."""
+        if self.command == utterance:
+            return UtteranceRole.COMMAND
+        if any(item.utterance == utterance for item in self.context):
+            return UtteranceRole.CONTEXT
+        return UtteranceRole.IGNORED
+
+    def effect_of(self, utterance: int) -> str:
+        """Return how the utterance at this index changes the task, if at all."""
+        for item in self.context:
+            if item.utterance == utterance:
+                return item.effect
+        return ""
 
 
 @dataclass(frozen=True)
 class Aggregate:
-    """The summed effect of every quantitative constraint, per object type.
+    """The summed effect of every quantitative constraint, per object type."""
 
-    ``totals`` maps an object type to the net change in how many are needed.
-    ``final`` maps it to the resulting absolute count, but only where the
-    command named one. ``assumed_distinct_speakers`` is True when claims had to
-    be counted as coming from different people because no speaker labels were
-    available -- the count is then only as good as that assumption.
+    totals: dict[str, int] = field(default_factory=dict)
+    """Net change in how many of each object type is needed."""
+
+    final: dict[str, int] = field(default_factory=dict)
+    """Resulting absolute count, for object types the command gave a number for."""
+
+    assumed_distinct_speakers: bool = False
+    """Whether claims were counted as separate people for want of voice labels.
+
+    .. note:: The totals are only as reliable as that assumption.
     """
 
-    totals: dict = field(default_factory=dict)
-    final: dict = field(default_factory=dict)
-    assumed_distinct_speakers: bool = False
-    duplicate_claims: tuple = ()
+    duplicate_claims: tuple[int, ...] = ()
+    """Indices whose claim repeated one already counted for the same voice."""
 
 
-def _is_index(value, utterance_count):
+# %% field-level checks
+
+
+def _is_index(value, utterance_count: int) -> bool:
     # bool is an int subclass; a JSON true/false is never a valid index.
     return (
         isinstance(value, int)
@@ -95,28 +179,26 @@ def _is_index(value, utterance_count):
     )
 
 
-def _require_index(value, utterance_count, role):
+def _require_index(value, utterance_count: int, field_name: str) -> int:
     if not _is_index(value, utterance_count):
         raise ValueError(
-            f"{role} must be an utterance index in 0..{utterance_count - 1}, "
+            f"{field_name} must be an utterance index in 0..{utterance_count - 1}, "
             f"got {value!r}"
         )
     return value
 
 
-def _require_object(value, known_objects, role):
+def _require_object_type(value, known_object_types, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{role} must be a non-empty object type")
+        raise ValueError(f"{field_name} must be a non-empty object type")
     name = value.strip()
-    if known_objects is not None and name not in known_objects:
-        choices = ", ".join(sorted(known_objects)) or "none"
-        raise ValueError(
-            f"unknown {role} type {name!r}; choose from: {choices}"
-        )
+    if known_object_types is not None and name not in known_object_types:
+        choices = ", ".join(sorted(known_object_types)) or "none"
+        raise ValueError(f"unknown {field_name} type {name!r}; choose from: {choices}")
     return name
 
 
-def _require_delta(value):
+def _require_delta(value) -> int:
     if not isinstance(value, int) or isinstance(value, bool):
         raise ValueError(f"delta must be a whole number, got {value!r}")
     if value == 0:
@@ -126,7 +208,7 @@ def _require_delta(value):
     return value
 
 
-def _require_count(value):
+def _require_count(value) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise ValueError(f"count must be a whole number >= 0, got {value!r}")
     if value > MAX_COUNT:
@@ -134,48 +216,59 @@ def _require_count(value):
     return value
 
 
-def _parse_quantity(value, known_objects):
+# %% payload parsing
+
+
+def _parse_quantity(value, known_object_types) -> list[QuantityRequest]:
     if not isinstance(value, list):
-        raise ValueError("'quantity' must be a JSON array")
-    requests = []
+        raise ValueError(f"{InterpretationKey.QUANTITY!s} must be a JSON array")
+    requests: list[QuantityRequest] = []
     for entry in value:
-        if not isinstance(entry, dict) or set(entry) != QUANTITY_KEYS:
+        if not isinstance(entry, dict) or frozenset(entry) != QUANTITY_KEYS:
             raise ValueError(
-                f"each 'quantity' item needs exactly the keys {sorted(QUANTITY_KEYS)}"
+                f"each {InterpretationKey.QUANTITY!s} item needs exactly the keys "
+                f"{sorted(QUANTITY_KEYS)}"
             )
-        name = _require_object(entry["object"], known_objects, "quantity.object")
-        if any(request.object == name for request in requests):
+        name = _require_object_type(
+            entry[QuantityKey.OBJECT], known_object_types, "quantity.object"
+        )
+        if any(request.object_type == name for request in requests):
             raise ValueError(f"quantity lists {name!r} more than once")
         requests.append(
-            QuantityRequest(object=name, count=_require_count(entry["count"]))
+            QuantityRequest(
+                object_type=name, count=_require_count(entry[QuantityKey.COUNT])
+            )
         )
     return requests
 
 
-def _parse_context(value, utterance_count, known_objects):
+def _parse_context(value, utterance_count: int, known_object_types) -> list[ContextItem]:
     if not isinstance(value, list):
-        raise ValueError("'context' must be a JSON array")
-    items = []
+        raise ValueError(f"{InterpretationKey.CONTEXT!s} must be a JSON array")
+    items: list[ContextItem] = []
     for entry in value:
-        if not isinstance(entry, dict) or set(entry) != CONTEXT_ITEM_KEYS:
+        if not isinstance(entry, dict) or frozenset(entry) != CONTEXT_ITEM_KEYS:
             raise ValueError(
-                "each 'context' item needs exactly the keys "
+                f"each {InterpretationKey.CONTEXT!s} item needs exactly the keys "
                 f"{sorted(CONTEXT_ITEM_KEYS)}"
             )
-        index = _require_index(entry["utterance"], utterance_count, "context.utterance")
-        effect = entry["effect"]
+        index = _require_index(
+            entry[ContextItemKey.UTTERANCE], utterance_count, "context.utterance"
+        )
+        effect = entry[ContextItemKey.EFFECT]
         if not isinstance(effect, str) or not effect.strip():
             raise ValueError("context.effect must be a non-empty string")
 
-        object_name, delta = entry["object"], entry["delta"]
-        if (object_name is None) != (delta is None):
+        object_type = entry[ContextItemKey.OBJECT]
+        delta = entry[ContextItemKey.DELTA]
+        if (object_type is None) != (delta is None):
             raise ValueError(
                 "context items need 'object' and 'delta' either both set (a "
                 "change in how many) or both null (any other change)"
             )
-        if object_name is not None:
-            object_name = _require_object(
-                object_name, known_objects, "context.object"
+        if object_type is not None:
+            object_type = _require_object_type(
+                object_type, known_object_types, "context.object"
             )
             delta = _require_delta(delta)
 
@@ -183,20 +276,23 @@ def _parse_context(value, utterance_count, known_objects):
             ContextItem(
                 utterance=index,
                 effect=effect.strip(),
-                object=object_name,
+                object_type=object_type,
                 delta=delta,
             )
         )
     return items
 
 
-def _parse_ignore(value, utterance_count):
+def _parse_ignore(value, utterance_count: int) -> list[int]:
     if not isinstance(value, list):
-        raise ValueError("'ignore' must be a JSON array")
-    return [_require_index(index, utterance_count, "ignore") for index in value]
+        raise ValueError(f"{InterpretationKey.IGNORE!s} must be a JSON array")
+    return [
+        _require_index(index, utterance_count, InterpretationKey.IGNORE)
+        for index in value
+    ]
 
 
-def _check_partition(command, context_items, ignore, utterance_count):
+def _check_partition(command, context_items, ignore, utterance_count: int) -> None:
     indices = []
     if command is not None:
         indices.append(command)
@@ -220,43 +316,43 @@ def _check_partition(command, context_items, ignore, utterance_count):
         )
 
 
-def known_object_names(context):
-    """Object types the scene may talk about, taken from the world context."""
+def known_object_types(context) -> set[str] | None:
+    """Return the object types the scene may talk about, or None if unrestricted."""
     if not context:
         return None
     names = set(context.get("objects", []))
     return names or None
 
 
-def parse_interpretation(data, utterance_count, context=None):
-    """Validate a raw interpretation object and return an :class:`Interpretation`.
+def parse_interpretation(
+    data, utterance_count: int, context=None
+) -> Interpretation:
+    """Validate a raw interpretation and return it as an :class:`Interpretation`.
 
-    Raises ValueError on any deviation, so the interpreter can hand the message
-    back to the model as a correction, exactly like the planner's guard. Object
-    types are checked against the world context, so a count can never be
-    attached to something the world does not hold.
+    :raises ValueError: on any deviation, worded so it can be handed back to the
+        model as a correction.
     """
     if not isinstance(data, dict):
         raise ValueError("interpretation must be a JSON object")
-    if set(data) != INTERPRETATION_KEYS:
-        missing = sorted(INTERPRETATION_KEYS - set(data))
-        extra = sorted(set(data) - INTERPRETATION_KEYS)
+    if frozenset(data) != INTERPRETATION_KEYS:
+        missing = sorted(INTERPRETATION_KEYS - frozenset(data))
+        extra = sorted(frozenset(data) - INTERPRETATION_KEYS)
         raise ValueError(
             f"interpretation keys must be exactly {sorted(INTERPRETATION_KEYS)}; "
             f"missing={missing}, extra={extra}"
         )
 
-    known_objects = known_object_names(context)
-    command = data["command"]
+    known_types = known_object_types(context)
+    command = data[InterpretationKey.COMMAND]
     if command is not None:
-        _require_index(command, utterance_count, "command")
-    quantity = _parse_quantity(data["quantity"], known_objects)
-    context_items = _parse_context(data["context"], utterance_count, known_objects)
-    ignore = _parse_ignore(data["ignore"], utterance_count)
+        _require_index(command, utterance_count, InterpretationKey.COMMAND)
+    quantity = _parse_quantity(data[InterpretationKey.QUANTITY], known_types)
+    context_items = _parse_context(
+        data[InterpretationKey.CONTEXT], utterance_count, known_types
+    )
+    ignore = _parse_ignore(data[InterpretationKey.IGNORE], utterance_count)
     _check_partition(command, context_items, ignore, utterance_count)
     if command is None and (context_items or quantity):
-        # A constraint modifies a command, so without one there is nothing for
-        # it to change; keeping it would record counts that never reach a plan.
         raise ValueError(
             "a scene without a command cannot carry 'context' or 'quantity'; "
             "either name the command utterance or ignore everything"
@@ -270,42 +366,46 @@ def parse_interpretation(data, utterance_count, context=None):
     )
 
 
-def aggregate(interpretation, utterances):
-    """Sum the quantitative constraints, counting each speaker's claim once.
+# %% counting
 
-    Two people each saying "I already have one" means two fewer; one person
-    saying it twice means one fewer. Without speaker labels the two cannot be
-    told apart, so identical claims are counted as distinct people -- the safer
-    reading for a room of several speakers -- and the result records that the
-    assumption was needed.
+
+def aggregate(
+    interpretation: Interpretation, utterances: list[SpokenUtterance]
+) -> Aggregate:
+    """Sum the quantitative constraints, counting each voice's claim once.
+
+    .. note:: Where a claim carries no voice label it cannot be matched against
+        another, so it counts on its own and
+        :attr:`Aggregate.assumed_distinct_speakers` is set.
     """
     claims = [item for item in interpretation.context if item.is_quantitative]
-    requested = {request.object: request.count for request in interpretation.quantity}
+    requested = {
+        request.object_type: request.count for request in interpretation.quantity
+    }
 
-    totals, seen_claims, duplicates = {}, set(), []
+    totals: dict[str, int] = {}
+    seen_claims: set[tuple[int, str, int]] = set()
+    duplicates: list[int] = []
     assumed_distinct = False
     for item in claims:
         speaker = utterances[item.utterance].speaker_id
         if speaker is None:
-            # No label to compare, so this claim cannot be merged with another.
             assumed_distinct = True
         else:
-            # The key holds the voice as well as the claim, so the same person
-            # repeating themselves collapses while two people making the same
-            # claim stay separate and each count.
-            claim = (speaker, item.object, item.delta)
+            # The voice is part of the key, so one person repeating themselves
+            # collapses while two people making the same claim each count.
+            claim = (speaker, item.object_type, item.delta)
             if claim in seen_claims:
                 duplicates.append(item.utterance)
                 continue
             seen_claims.add(claim)
-        totals[item.object] = totals.get(item.object, 0) + item.delta
+        totals[item.object_type] = totals.get(item.object_type, 0) + item.delta
 
-    final = {}
-    for object_name, total in totals.items():
-        # An absolute count is only possible where the command named one; five
-        # requested and three already taken care of leaves two, never below zero.
-        if object_name in requested:
-            final[object_name] = max(0, requested[object_name] + total)
+    final = {
+        object_type: max(0, requested[object_type] + total)
+        for object_type, total in totals.items()
+        if object_type in requested
+    }
 
     return Aggregate(
         totals=totals,
@@ -315,52 +415,49 @@ def aggregate(interpretation, utterances):
     )
 
 
-def plural(object_name, count):
-    """Best-effort plural of a world-context type name, for readable clauses."""
+# %% instruction wording
+
+
+def pluralize(object_type: str, count: int) -> str:
+    """Return the type name in the number matching the count."""
     if count == 1:
-        return object_name
-    lowered = object_name.lower()
+        return object_type
+    lowered = object_type.lower()
     if lowered.endswith(("s", "x", "z", "ch", "sh")):
-        return f"{object_name}es"
+        return f"{object_type}es"
     if lowered.endswith("fe"):
-        return f"{object_name[:-2]}ves"
+        return f"{object_type[:-2]}ves"
     if lowered.endswith("f"):
-        return f"{object_name[:-1]}ves"
-    return f"{object_name}s"
+        return f"{object_type[:-1]}ves"
+    return f"{object_type}s"
 
 
-def _quantity_clauses(summary):
+def _quantity_clauses(summary: Aggregate) -> list[str]:
     clauses = []
-    for object_name in sorted(summary.totals):
-        total = summary.totals[object_name]
-        if object_name in summary.final:
-            count = summary.final[object_name]
-            clauses.append(
-                f"Bring exactly {count} {plural(object_name, count)}."
-            )
+    for object_type in sorted(summary.totals):
+        if object_type in summary.final:
+            count = summary.final[object_type]
+            clauses.append(f"Bring exactly {count} {pluralize(object_type, count)}.")
             continue
-        amount = abs(total)
-        direction = "fewer" if total < 0 else "more"
+        amount = abs(summary.totals[object_type])
+        direction = "fewer" if summary.totals[object_type] < 0 else "more"
         clauses.append(
-            f"Bring {amount} {direction} {plural(object_name, amount)} "
+            f"Bring {amount} {direction} {pluralize(object_type, amount)} "
             "than the command asks for."
         )
     return clauses
 
 
-def fuse(interpretation, utterances):
-    """Compose the single instruction that goes to the planner.
+def fuse(
+    interpretation: Interpretation, utterances: list[SpokenUtterance]
+) -> str | None:
+    """Compose the single instruction for the planner, or None without a command.
 
-    Quantitative constraints collapse into one counted clause per object type,
-    so three people each saying "I already have one" yields one clear number
-    instead of three repeated remarks. Other constraints keep their own clause.
-    Returns None when there is no command.
+    Quantitative constraints become one counted clause per object type; every
+    other constraint contributes its own clause.
     """
     if interpretation.command is None:
         return None
-    # The command text carries the task; the clauses are appended to it, so the
-    # planner receives one ordinary sentence and needs to know nothing about how
-    # the scene was triaged.
     base = utterances[interpretation.command].text.strip()
     summary = aggregate(interpretation, utterances)
     other_clauses = [

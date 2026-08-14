@@ -40,13 +40,21 @@ def default_options():
 class SpeechSegment:
     """One stretch of speech: when it happened and the audio it contains."""
 
-    start_s: float  # offset into the recording, in seconds
+    start_s: float
+    """Offset into the recording where the speech starts, in seconds."""
+
     end_s: float
-    samples: np.ndarray  # the speech audio itself, float32 at SAMPLING_RATE
+    """Offset where it ends."""
+
+    samples: np.ndarray
+    """The speech audio itself, float32 at :attr:`sampling_rate`."""
+
     sampling_rate: int = SAMPLING_RATE
+    """Samples per second the audio was captured at."""
 
     @property
-    def duration_s(self):
+    def duration_s(self) -> float:
+        """How long the segment lasts, in seconds."""
         return self.end_s - self.start_s
 
 

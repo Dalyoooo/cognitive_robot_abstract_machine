@@ -1,49 +1,101 @@
-"""Asks the model to triage a scene, and checks what comes back.
+"""Asks a model to triage a scene and checks the answer before using it.
 
-One pass is: build the two messages, generate an answer, parse it as JSON, run it
-through the guard in :mod:`thesis_demo.dialogue.schema`. If the guard rejects it,
-the reason is appended to the conversation and the model answers again, up to
-``max_attempts`` times.
-
-``generate`` is passed in rather than imported so the loop can run against a stub
-in tests, and against the planner's already-loaded model in the demo.
+One pass builds the two messages, generates an answer, parses it as JSON and runs
+it through the guard in :mod:`thesis_demo.dialogue.schema`. A rejected answer is
+returned to the model together with the reason, up to ``max_attempts`` times.
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from enum import StrEnum
 
 from thesis_demo.dialogue.prompt import system_prompt, user_turn
 from thesis_demo.dialogue.schema import (
     Aggregate,
     Interpretation,
+    SpokenUtterance,
     aggregate,
     fuse,
     parse_interpretation,
 )
 
+DEFAULT_MAX_ATTEMPTS = 2
+"""How often the model may answer again after a rejection."""
+
+DEFAULT_TEMPERATURE = 0.1
+"""Sampling temperature for the triage, low so the answer stays reproducible."""
+
+GENERATE_UNTIL_END_OF_TEXT = -1
+"""Token limit meaning "generate until the model stops"."""
+
+
+class Outcome(StrEnum):
+    """What came of interpreting a scene."""
+
+    OK = "ok"
+    NO_COMMAND = "no_command"
+    ERROR = "error"
+
+
+class MessageRole(StrEnum):
+    """Speaker of one chat message sent to the model."""
+
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+
+
+class MessageKey(StrEnum):
+    """Keys of one chat message."""
+
+    ROLE = "role"
+    CONTENT = "content"
+
+
+# %% result
+
 
 @dataclass(frozen=True)
 class InterpretationResult:
-    # "ok": a command was found. "no_command": the scene held no command for the
-    # robot. "error": no valid inter
-    # pretation after every attempt.
-    outcome: str
+    """The triage of one scene, whether or not it succeeded."""
+
+    outcome: Outcome
+    """Whether a command was found, none was, or no valid answer arrived."""
+
     instruction: str | None
+    """The single sentence for the planner, absent without a command."""
+
     interpretation: Interpretation | None
+    """The validated interpretation, absent on :attr:`Outcome.ERROR`."""
+
     command_text: str | None
+    """Words of the commanding utterance."""
+
     constraints: tuple[str, ...]
+    """Effect of every accepted background utterance, in the order heard."""
+
     ignored: tuple[str, ...]
+    """Words of every utterance judged not to affect the task."""
+
     raw_response: str
+    """Last answer the model gave, kept for inspection."""
+
     attempts: int
+    """How many answers were needed."""
+
     rejection_reason: str | None = None
-    # How the counted constraints added up, and whether counting had to assume
-    # that identical claims came from different people.
+    """Why the last answer was refused, on :attr:`Outcome.ERROR`."""
+
     counts: Aggregate | None = None
+    """How the counted constraints added up."""
 
 
-def _correction_message(reason):
+# %% the loop
+
+
+def _correction_message(reason: str) -> str:
     return (
         f"Your answer was rejected: {reason}\n"
         "Reply again with exactly one JSON object of the required shape. "
@@ -52,7 +104,11 @@ def _correction_message(reason):
     )
 
 
-def _parse(raw_response, utterance_count, context):
+def _chat_message(role: MessageRole, content: str) -> dict[str, str]:
+    return {MessageKey.ROLE: role.value, MessageKey.CONTENT: content}
+
+
+def _parse(raw_response: str, utterance_count: int, context):
     try:
         data = json.loads(raw_response.strip())
     except json.JSONDecodeError:
@@ -63,21 +119,23 @@ def _parse(raw_response, utterance_count, context):
         return None, str(error)
 
 
-def interpret(utterances, context, generate, max_attempts=2):
-    """Triage a recorded scene into command, context and noise.
+def interpret(
+    utterances: list[SpokenUtterance],
+    context,
+    generate,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+) -> InterpretationResult:
+    """Triage a recorded scene into command, relevant context and noise.
 
-    ``generate`` is any callable that maps a list of chat messages to the
-    model's raw text reply. Keeping it injectable lets the deterministic parts
-    run under a mock here and against the real GGUF model in the planner
-    environment, without this
-     module depending on the model.
+    :param generate: maps a list of chat messages to the model's raw text reply.
+        Passing it in keeps this loop independent of any particular model.
     """
     if max_attempts < 1:
         raise ValueError("max_attempts must be at least 1")
 
     messages = [
-        {"role": "system", "content": system_prompt()},
-        {"role": "user", "content": user_turn(utterances, context)},
+        _chat_message(MessageRole.SYSTEM, system_prompt()),
+        _chat_message(MessageRole.USER, user_turn(utterances, context)),
     ]
 
     attempt_reasons = []
@@ -92,16 +150,14 @@ def interpret(utterances, context, generate, max_attempts=2):
             break
         attempt_reasons.append(reason)
         if attempt < max_attempts:
-            # The rejected answer and the reason for it are added to the
-            # conversation, so the next attempt sees what was wrong with the last.
             messages = messages + [
-                {"role": "assistant", "content": raw_response},
-                {"role": "user", "content": _correction_message(reason)},
+                _chat_message(MessageRole.ASSISTANT, raw_response),
+                _chat_message(MessageRole.USER, _correction_message(reason)),
             ]
 
     if interpretation is None:
         return InterpretationResult(
-            outcome="error",
+            outcome=Outcome.ERROR,
             instruction=None,
             interpretation=None,
             command_text=None,
@@ -112,16 +168,14 @@ def interpret(utterances, context, generate, max_attempts=2):
             rejection_reason=attempt_reasons[-1] if attempt_reasons else "unknown",
         )
 
-    command_text = (
-        utterances[interpretation.command].text
-        if interpretation.command is not None
-        else None
-    )
+    has_command = interpretation.command is not None
     return InterpretationResult(
-        outcome="ok" if interpretation.command is not None else "no_command",
+        outcome=Outcome.OK if has_command else Outcome.NO_COMMAND,
         instruction=fuse(interpretation, utterances),
         interpretation=interpretation,
-        command_text=command_text,
+        command_text=(
+            utterances[interpretation.command].text if has_command else None
+        ),
         constraints=tuple(item.effect for item in interpretation.context),
         ignored=tuple(utterances[index].text for index in interpretation.ignore),
         raw_response=raw_response,
@@ -130,13 +184,20 @@ def interpret(utterances, context, generate, max_attempts=2):
     )
 
 
-def planner_backend(temperature=0.1, seed=0, max_tokens=-1):
+# %% model backend
+
+
+def planner_backend(
+    temperature: float = DEFAULT_TEMPERATURE,
+    seed: int = 0,
+    max_tokens: int = GENERATE_UNTIL_END_OF_TEXT,
+):
     """Build a ``generate`` callable backed by the planner's loaded GGUF model.
 
-    Imported lazily so this module stays usable (and testable) in environments
-    without llama.cpp. Reuses the single model instance setup_planner() loaded;
-    it does not load a second one.
+    :raises RuntimeError: when no model has been loaded yet.
     """
+    # Imported here rather than at module level so this module stays importable
+    # where llama.cpp is absent.
     from thesis_demo.planner import llm as planner_llm
 
     def generate(messages):

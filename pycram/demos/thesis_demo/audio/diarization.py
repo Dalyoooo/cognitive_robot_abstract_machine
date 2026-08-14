@@ -1,90 +1,118 @@
 """Groups speech segments by voice.
 
-Each segment is turned into an embedding, a row of numbers describing the voice
-rather than the words. Embeddings of one person land close together, so the
-cosine distance between them is small; clustering then puts every segment whose
-distance falls under a threshold into the same group and numbers the groups.
+Each segment becomes an embedding, a row of numbers describing the voice rather
+than the words. Embeddings of one person lie close together, so clustering puts
+every segment whose cosine distance falls under a threshold into one group and
+numbers the groups.
 
-The numbers only tell voices apart inside one recording. Nothing here recognises
-who anyone is, and no speaker is known in advance.
+.. note:: The numbers only tell voices apart within one recording. Nothing here
+    recognises who anyone is, and no speaker is known in advance.
 """
 
 from __future__ import annotations
+
 import os
 import tempfile
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
+
 import librosa
 import numpy as np
-from thesis_demo.audio.vad import SAMPLING_RATE
 
-# Cosine-distance thresholds below which two segments count as the same voice.
-# These are starting points, not settled values: the right cut depends on the
-# microphone, the room and how much the voices differ. Calibrate them on real
-# recordings with ``pairwise_distances`` before trusting a speaker count.
-DEFAULT_THRESHOLDS = {"mfcc": 0.15, "ecapa": 0.30}
+from thesis_demo.audio.vad import SAMPLING_RATE, SpeechSegment
+
+# %% configuration
+
+
+class EmbeddingBackend(StrEnum):
+    """Which model describes a voice."""
+
+    MFCC = "mfcc"
+    ECAPA = "ecapa"
+
+
+class LinkageMethod(StrEnum):
+    """How the distance between two groups of embeddings is measured."""
+
+    AVERAGE = "average"
+
+
+class DistanceMetric(StrEnum):
+    """How the distance between two embeddings is measured."""
+
+    COSINE = "cosine"
+
+
+ECAPA_MODEL_DIR_VARIABLE = "ECAPA_MODEL_DIR"
+"""Environment variable naming a directory the ECAPA weights already live in."""
+
+ECAPA_SOURCE = "speechbrain/spkrec-ecapa-voxceleb"
+"""Model the ECAPA backend loads."""
+
+DEFAULT_THRESHOLDS = {
+    EmbeddingBackend.MFCC: 0.15,
+    EmbeddingBackend.ECAPA: 0.30,
+}
+"""Cosine distance below which two segments count as the same voice.
+
+.. warning:: Starting points only. The right cut depends on the microphone, the
+    room and how much the voices differ, so calibrate with
+    :func:`pairwise_distances` on real recordings before trusting a speaker count.
+"""
+
+FALLBACK_THRESHOLD = 0.15
+"""Threshold for a backend :data:`DEFAULT_THRESHOLDS` does not cover."""
 
 MIN_EMBEDDING_DURATION_S = 0.3
+"""Shortest segment a voice can be judged from."""
+
+MFCC_COEFFICIENT_COUNT = 20
+"""Coefficients per analysis window in the MFCC baseline."""
+
+FIRST_SPEAKER_LABEL = 1
+"""Number given to the first voice heard."""
 
 
-def mfcc_embedding(samples, sampling_rate=SAMPLING_RATE):
+# %% embedding backends
+
+
+def mfcc_embedding(samples, sampling_rate: int = SAMPLING_RATE) -> np.ndarray:
     """Describe a voice by the average shape of its spectrum.
 
-    A dependency-free baseline: mel-frequency cepstral coefficients capture
-    timbre, and their mean and spread over the segment form the fingerprint.
-    It reacts to loudness and emotion as much as to the person, so it separates
-    only clearly different voices -- useful as a comparison baseline, not as a
-    strong speaker model.
+    .. note:: This baseline needs no extra packages, but it reacts to loudness
+        and emotion as much as to the person, so it separates only clearly
+        different voices.
     """
-
     samples = np.ascontiguousarray(samples, dtype=np.float32)
-    # 20 coefficients per short window, so one row of 20 numbers per window.
     coefficients = librosa.feature.mfcc(
-        y=samples, sr=sampling_rate, n_mfcc=20
+        y=samples, sr=sampling_rate, n_mfcc=MFCC_COEFFICIENT_COUNT
     )
-    # Averaging over all windows gives the typical spectrum of this segment and
-    # the spread says how much it varied: 40 numbers, whatever the length was.
+    # The mean over all windows is the typical spectrum, the spread says how much
+    # it varied: a fixed-length description whatever the segment length was.
     embedding = np.concatenate(
         [coefficients.mean(axis=1), coefficients.std(axis=1)]
     )
-    return _normalize(embedding)
+    return normalize(embedding)
 
 
-def ecapa_model_dir(source):
-    """Where the ECAPA weights live locally.
+def ecapa_embedding_backend(source: str = ECAPA_SOURCE):
+    """Build an ECAPA-TDNN embedding function.
 
-    ``ECAPA_MODEL_DIR`` lets a deployment point at a directory populated when the
-    image was built, so a container does not download the model again in every
-    session. Without it the weights land in a temporary directory.
+    The model describes *who* speaks regardless of *what* is said, which holds up
+    where the MFCC baseline is weakest: shouting, emotion and short segments. It
+    runs locally once downloaded.
     """
-    configured = os.environ.get("ECAPA_MODEL_DIR")
-    if configured:
-        return configured
-    return str(Path(tempfile.gettempdir()) / source.replace("/", "_"))
-
-
-def ecapa_embedding_backend(source="speechbrain/spkrec-ecapa-voxceleb"):
-    """Build an ECAPA-TDNN embedding function; needs speechbrain installed.
-
-    The model is trained to describe *who* speaks regardless of *what* is said,
-    which is what makes it robust where the MFCC baseline is weak: shouting,
-    emotion, and short segments. It runs locally once downloaded.
-    """
-    # Imported here, not at module level: speechbrain and torch are only needed
-    # for this backend, so the MFCC baseline keeps working without them.
+    # Imported here rather than at module level so the MFCC baseline keeps working
+    # where speechbrain and torch are not installed.
     import torch
     from speechbrain.inference.speaker import EncoderClassifier
 
     encoder = EncoderClassifier.from_hparams(
-        source=source,
-        savedir=ecapa_model_dir(source),
+        source=source, savedir=ecapa_model_dir(source)
     )
 
-    def embed(samples, sampling_rate=SAMPLING_RATE):
-
-        # The model was trained on 16 kHz audio and takes the waveform as-is, so
-        # samples at another rate would be read at the wrong speed and yield a
-        # fingerprint of nobody. Refuse rather than return something plausible.
+    def embed(samples, sampling_rate: int = SAMPLING_RATE) -> np.ndarray:
         if sampling_rate != SAMPLING_RATE:
             raise ValueError(
                 f"ECAPA expects {SAMPLING_RATE} Hz audio, got {sampling_rate} Hz; "
@@ -95,34 +123,50 @@ def ecapa_embedding_backend(source="speechbrain/spkrec-ecapa-voxceleb"):
         ).unsqueeze(0)
         with torch.no_grad():
             embedding = encoder.encode_batch(waveform).squeeze().cpu().numpy()
-        return _normalize(embedding)
+        return normalize(embedding)
 
     return embed
 
 
-def _normalize(vector):
+def ecapa_model_dir(source: str = ECAPA_SOURCE) -> str:
+    """Return the directory the ECAPA weights are read from and written to.
+
+    :data:`ECAPA_MODEL_DIR_VARIABLE` names it where a deployment pre-loaded the
+    model; otherwise a temporary directory is used.
+    """
+    configured = os.environ.get(ECAPA_MODEL_DIR_VARIABLE)
+    if configured:
+        return configured
+    return str(Path(tempfile.gettempdir()) / source.replace("/", "_"))
+
+
+# %% distances
+
+
+def normalize(vector) -> np.ndarray:
     """Scale a vector to length 1 so only its direction carries information."""
     vector = np.asarray(vector, dtype=np.float64).ravel()
     norm = np.linalg.norm(vector)
     return vector if norm == 0 else vector / norm
 
 
-def cosine_distance(first, second):
-    """0 for identical directions, 1 for unrelated, 2 for opposite ones."""
-    # Both vectors are already length 1, so their dot product is the cosine of
-    # the angle between them and subtracting it from 1 turns it into a distance.
+def cosine_distance(first, second) -> float:
+    """Return 0 for identical directions, 1 for unrelated, 2 for opposite ones."""
+    # Both vectors have length 1, so their dot product is the cosine of the angle
+    # between them.
     return float(1.0 - np.dot(first, second))
 
 
-def pairwise_distances(segments, embed=None):
-    """Cosine distance between every pair of segments.
+def pairwise_distances(segments: list[SpeechSegment], embed=None) -> np.ndarray:
+    """Return the cosine distance between every pair of segments.
 
-    Made public because choosing a threshold is an empirical step: printing this
-    matrix for a recording shows where same-voice distances end and
-    different-voice distances begin.
+    Printing this for a recording shows where same-voice distances end and
+    different-voice distances begin, which is how a threshold is chosen.
     """
     embed = embed or mfcc_embedding
-    embeddings = [embed(segment.samples, segment.sampling_rate) for segment in segments]
+    embeddings = [
+        embed(segment.samples, segment.sampling_rate) for segment in segments
+    ]
     count = len(embeddings)
     matrix = np.zeros((count, count))
     for row in range(count):
@@ -132,97 +176,103 @@ def pairwise_distances(segments, embed=None):
     return matrix
 
 
+# %% grouping
+
+
 @dataclass
 class Diarizer:
     """Groups speech segments by voice, without knowing who the speakers are.
 
-    Speaker numbers are labels for telling voices apart, not identities: the
-    same person keeps one number within a recording, and nothing is claimed
-    about who they are. The number of speakers is not fixed in advance -- the
-    threshold decides it, which is what a household scene needs.
+    The number of voices is not fixed in advance; :attr:`threshold` decides it.
     """
 
     embed: object = None
+    """Function mapping samples and their rate to an embedding."""
+
     threshold: float = None
-    backend_name: str = "mfcc"
-    # Set by assign() to the indices it could not judge, so a caller can see
-    # which voices were left unknown rather than having to infer it.
-    skipped_short: list = field(default_factory=list)
+    """Cosine distance below which two segments count as one voice."""
+
+    backend_name: EmbeddingBackend = EmbeddingBackend.MFCC
+    """Which backend :attr:`embed` came from, used to pick a default threshold."""
+
+    skipped_short: list[int] = field(default_factory=list)
+    """Indices the last :meth:`assign` could not judge, being too short."""
 
     def __post_init__(self):
         if self.embed is None:
             self.embed = mfcc_embedding
         if self.threshold is None:
-            self.threshold = DEFAULT_THRESHOLDS.get(self.backend_name, 0.15)
+            self.threshold = DEFAULT_THRESHOLDS.get(
+                self.backend_name, FALLBACK_THRESHOLD
+            )
 
-    def assign(self, segments):
-        """Return one speaker label per segment, numbered from 1.
+    def assign(self, segments: list[SpeechSegment]) -> list[int | None]:
+        """Return one speaker label per segment, numbered in order of appearance.
 
-        Segments too short for a reliable fingerprint get None rather than a
-        guessed label, so downstream counting can see that the voice is unknown
-        instead of trusting a coin flip.
+        .. note:: A segment shorter than :data:`MIN_EMBEDDING_DURATION_S` gets
+            None rather than a guessed label, so a caller can see that the voice
+            is unknown.
         """
         if not segments:
             return []
 
         self.skipped_short = []
-        # usable holds the positions in `segments` that are long enough to judge,
-        # and embeddings holds one vector for each of them, in the same order.
         usable, embeddings = [], []
         for index, segment in enumerate(segments):
             if segment.duration_s < MIN_EMBEDDING_DURATION_S:
                 self.skipped_short.append(index)
                 continue
             usable.append(index)
-            # Each segment carries the rate its samples were captured at, and a
-            # fingerprint computed against the wrong rate describes no one.
+            # The rate comes from the segment: an embedding computed against the
+            # wrong rate describes no one.
             embeddings.append(self.embed(segment.samples, segment.sampling_rate))
 
-        labels = [None] * len(segments)
+        labels: list[int | None] = [None] * len(segments)
         if not usable:
             return labels
         if len(usable) == 1:
-            # Nothing to compare against, so the one voice present is speaker 1.
-            labels[usable[0]] = 1
+            labels[usable[0]] = FIRST_SPEAKER_LABEL
             return labels
 
-        # One clustering run covers every segment at once; the loop only copies
-        # each result back to the position the segment came from.
+        # One run covers every segment; the loop only copies each result back to
+        # the position its segment came from.
         clustered = self._cluster(np.vstack(embeddings))
         for position, index in enumerate(usable):
             labels[index] = int(clustered[position])
         return labels
 
-    def _cluster(self, embeddings):
+    def _cluster(self, embeddings) -> list[int]:
         from sklearn.cluster import AgglomerativeClustering
 
         clustering = AgglomerativeClustering(
-            # n_clusters=None with a distance_threshold means the number of
-            # speakers comes out of the data instead of being fixed beforehand:
-            # groups keep merging while they are closer than the threshold.
+            # Without a fixed cluster count, groups keep merging while they are
+            # closer than the threshold, so the data decides how many voices.
             n_clusters=None,
             distance_threshold=self.threshold,
-            metric="cosine",
-            linkage="average",
+            metric=DistanceMetric.COSINE.value,
+            linkage=LinkageMethod.AVERAGE.value,
         ).fit(embeddings)
-        # sklearn hands back arbitrary group ids, so they are renumbered by first
-        # appearance: the voice heard first becomes speaker 1, the next one 2.
+        # The group ids are arbitrary, so they are renumbered by first appearance.
         order, renumbered = {}, []
         for label in clustering.labels_:
             if label not in order:
-                order[label] = len(order) + 1
+                order[label] = len(order) + FIRST_SPEAKER_LABEL
             renumbered.append(order[label])
         return renumbered
 
 
-def load_diarizer(backend="mfcc", threshold=None):
-    """Build a :class:`Diarizer` for the named embedding backend."""
-    if backend == "mfcc":
-        return Diarizer(embed=mfcc_embedding, threshold=threshold, backend_name="mfcc")
-    if backend == "ecapa":
+def load_diarizer(
+    backend: EmbeddingBackend = EmbeddingBackend.MFCC, threshold: float = None
+) -> Diarizer:
+    """Build a :class:`Diarizer` for the named embedding backend.
+
+    :raises ValueError: for a backend that does not exist.
+    """
+    backend = EmbeddingBackend(backend)
+    if backend is EmbeddingBackend.MFCC:
         return Diarizer(
-            embed=ecapa_embedding_backend(),
-            threshold=threshold,
-            backend_name="ecapa",
+            embed=mfcc_embedding, threshold=threshold, backend_name=backend
         )
-    raise ValueError(f"Unknown backend {backend!r}; choose 'mfcc' or 'ecapa'")
+    return Diarizer(
+        embed=ecapa_embedding_backend(), threshold=threshold, backend_name=backend
+    )

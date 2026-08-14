@@ -97,16 +97,19 @@ def _convert_webm_to_wav(webm_data, work_dir):
 
 @dataclass(frozen=True)
 class Utterance:
-    """One transcribed speech segment out of a recorded scene.
-
-    ``speaker_id`` stays None until speaker separation runs; role and relevance
-    are decided later, from the text and the world context, not here.
-    """
+    """One transcribed speech segment out of a recorded scene."""
 
     text: str
+    """The recognised words."""
+
     start_s: float
+    """Offset into the recording where the utterance starts, in seconds."""
+
     end_s: float
+    """Offset where it ends."""
+
     speaker_id: int | None = None
+    """Which voice said it, or None while voices have not been told apart."""
 
 
 def _run_whisper(audio):

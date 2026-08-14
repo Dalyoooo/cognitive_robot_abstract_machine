@@ -1,0 +1,17 @@
+# Hand a validated plan to the executor and follow it step by step.
+#
+# The plan travels as JSON rather than as a typed message: the planner already
+# produces JSON, the guard already validates it against that shape, and keeping
+# one representation end to end avoids a second schema that could drift from it.
+
+# Goal: the plan to run, as produced by the planner and accepted by the guard.
+string plan_json
+---
+# Result: what the executor made of it, including domain failures. A rejected
+# plan is reported in here rather than by aborting the goal, so the caller can
+# tell "could not be executed" apart from "the action itself went wrong".
+string result_json
+---
+# Feedback: one message per completed step, so a UI can follow along.
+int32 step_index
+string step_json

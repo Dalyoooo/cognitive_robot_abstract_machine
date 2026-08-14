@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>thesis_demo_msgs</name>
+  <version>0.1.0</version>
+  <description>
+    Action definitions for the thesis_demo speech pipeline. Kept as its own
+    interface package because both sides need the generated types: the executor
+    in pycram/demos/thesis_demo/action_server.py and any client sending a plan.
+  </description>
+  <maintainer email="dalia_benamar@gmx.de">Dalyoooo</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <!-- Turns the .action file into the Goal/Result/Feedback classes. -->
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+
+  <!-- Every action carries goal status messages, which live in action_msgs. -->
+  <depend>action_msgs</depend>
+
+  <exec_depend>rosidl_default_runtime</exec_depend>
+
+  <!-- Without this marker no interfaces are generated at all. -->
+  <member_of_group>rosidl_interface_packages</member_of_group>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

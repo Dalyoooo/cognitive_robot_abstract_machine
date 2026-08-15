@@ -484,8 +484,48 @@ def _clear_markers(node, topic="/semworld/viz_marker", timeout=5.0):
     marker_array.markers.append(marker)
     publisher.publish(marker_array)
 
+    # The publisher keeps its last sample on offer as long as it exists, so a
+    # viewer connecting later could still receive this delete after the real
+    # markers and wipe them. Drop it once the delete is out.
+    time.sleep(0.2)
+    node.destroy_publisher(publisher)
 
-def start_visualization(world):
+
+REPUBLISH_PERIOD_S = 1.0
+"""How often the current marker array is repeated for late subscribers."""
+
+VIEWER_ROOT_FRAME = "map"
+"""Frame the viewer resolves everything against."""
+
+
+def _anchor_world_to_viewer_frame(node, world, parent_frame=VIEWER_ROOT_FRAME):
+    """Tie the world root to the frame the viewer treats as fixed.
+
+    Frames carry the name of the body they belong to, so the root of the
+    apartment is called something like ``apartment/apartment_root`` and changes
+    with the environment. A viewer configured on a fixed frame of its own finds
+    no path to those frames and drops every marker. One static identity
+    transform connects the two trees.
+    """
+    from geometry_msgs.msg import TransformStamped
+    from tf2_ros import StaticTransformBroadcaster
+
+    root_frame = str(world.root.name)
+    if root_frame == parent_frame:
+        return None
+
+    transform = TransformStamped()
+    transform.header.stamp = node.get_clock().now().to_msg()
+    transform.header.frame_id = parent_frame
+    transform.child_frame_id = root_frame
+    transform.transform.rotation.w = 1.0
+
+    broadcaster = StaticTransformBroadcaster(node)
+    broadcaster.sendTransform(transform)
+    return broadcaster
+
+
+def start_visualization(world, republish_period_s=REPUBLISH_PERIOD_S):
     import rclpy
     from semantic_digital_twin.adapters.ros.visualization.viz_marker import (
         VizMarkerPublisher,
@@ -495,7 +535,19 @@ def start_visualization(world):
         rclpy.init()
     node = rclpy.create_node("viz_marker")
     _clear_markers(node)
-    VizMarkerPublisher(_world=world, node=node).with_tf_publisher()
+    # Held on the node so the broadcaster outlives this call.
+    node._viewer_frame_broadcaster = _anchor_world_to_viewer_frame(node, world)
+    marker_publisher = VizMarkerPublisher(_world=world, node=node)
+    marker_publisher.with_tf_publisher()
+
+    # The world sends its markers once, when it is built. RViz subscribes with
+    # volatile durability, so it keeps nothing that was sent before it
+    # connected and stays empty. Repeating the array on a timer gives every
+    # subscriber the scene regardless of when it joined.
+    node.create_timer(
+        republish_period_s,
+        lambda: marker_publisher.pub.publish(marker_publisher.markers),
+    )
     return node
 
 

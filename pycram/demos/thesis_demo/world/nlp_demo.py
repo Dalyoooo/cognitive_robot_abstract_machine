@@ -552,6 +552,7 @@ def start_visualization(
     world, camera_target=None, republish_period_s=REPUBLISH_PERIOD_S
 ):
     import rclpy
+    from semantic_digital_twin.adapters.ros.tf_publisher import TFPublisher
     from semantic_digital_twin.adapters.ros.visualization.viz_marker import (
         VizMarkerPublisher,
     )
@@ -563,16 +564,21 @@ def start_visualization(
     # Held on the node so the broadcaster outlives this call.
     node._viewer_frame_broadcaster = _publish_viewer_frames(node, world, camera_target)
     marker_publisher = VizMarkerPublisher(_world=world, node=node)
-    marker_publisher.with_tf_publisher()
+    tf_publisher = TFPublisher(_world=world, node=node)
 
-    # The world sends its markers once, when it is built. RViz subscribes with
-    # volatile durability, so it keeps nothing that was sent before it
-    # connected and stays empty. Repeating the array on a timer gives every
-    # subscriber the scene regardless of when it joined.
-    node.create_timer(
-        republish_period_s,
-        lambda: marker_publisher.pub.publish(marker_publisher.markers),
-    )
+    # Both the shapes and the frames they hang in are sent once: the markers
+    # when the world is built, the transforms whenever the world state moves.
+    # A viewer that connects later receives neither, because both topics drop
+    # what was sent before it subscribed, so it shows an empty scene. Repeating
+    # them on a timer means the scene no longer depends on when a viewer joined.
+    # Without the transforms the markers alone are useless; every one of them
+    # names the body frame it belongs to and is discarded if that frame is
+    # unknown.
+    def republish_scene():
+        marker_publisher.pub.publish(marker_publisher.markers)
+        tf_publisher.on_state_change()
+
+    node.create_timer(republish_period_s, republish_scene)
     return node
 
 

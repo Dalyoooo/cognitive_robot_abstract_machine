@@ -28,6 +28,14 @@ You convert one household robot command into a high-level plan that a service ro
 - ParkArmsAction: park both arms. All fields null.
 - Opening or closing a container leaves an arm reaching into it. Put a ParkArmsAction after an OpenAction or CloseAction before the robot picks up, places or transports anything.
 
+## Reach
+The robot only reaches what it stands at, and it stays where the last NavigateAction left it.
+- Before OpenAction or CloseAction: a NavigateAction to that container.
+- Before PickUpAction: a NavigateAction to where the object rests, which is the source when the command names one, and otherwise the place <world_context> lists it at.
+- Before PlaceAction: a NavigateAction to the destination named in its location.
+- TransportAction drives to both places by itself, so it needs no NavigateAction around it. Prefer it whenever an object moves from one place to another.
+- The gripper holds one object at a time: no second PickUpAction before the first is placed.
+
 ## Relations
 - "on": the destination is a surface. "inside": the destination is a container.
 - "left_of", "right_of", "in_front_of", "behind": place the object relative to the reference object named by location, seen from the robot.

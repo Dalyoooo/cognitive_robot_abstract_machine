@@ -497,35 +497,60 @@ REPUBLISH_PERIOD_S = 1.0
 VIEWER_ROOT_FRAME = "map"
 """Frame the viewer resolves everything against."""
 
+VIEWER_CAMERA_FRAME = "demo_camera_target"
+"""Frame the viewer's orbit camera turns around."""
 
-def _anchor_world_to_viewer_frame(node, world, parent_frame=VIEWER_ROOT_FRAME):
-    """Tie the world root to the frame the viewer treats as fixed.
+
+def _static_transform(stamp, parent_frame, child_frame, translation=(0.0, 0.0, 0.0)):
+    from geometry_msgs.msg import TransformStamped
+
+    transform = TransformStamped()
+    transform.header.stamp = stamp
+    transform.header.frame_id = parent_frame
+    transform.child_frame_id = child_frame
+    transform.transform.translation.x = float(translation[0])
+    transform.transform.translation.y = float(translation[1])
+    transform.transform.translation.z = float(translation[2])
+    transform.transform.rotation.w = 1.0
+    return transform
+
+
+def _publish_viewer_frames(
+    node, world, camera_target=None, parent_frame=VIEWER_ROOT_FRAME
+):
+    """Publish the frames a viewer needs to place and aim at the scene.
 
     Frames carry the name of the body they belong to, so the root of the
     apartment is called something like ``apartment/apartment_root`` and changes
     with the environment. A viewer configured on a fixed frame of its own finds
-    no path to those frames and drops every marker. One static identity
-    transform connects the two trees.
+    no path to those frames and drops every marker, which leaves an empty grid.
+    The camera frame gives the orbit view a point to turn around; without it
+    the view opens on an arbitrary spot that need not contain the scene.
     """
-    from geometry_msgs.msg import TransformStamped
     from tf2_ros import StaticTransformBroadcaster
 
+    stamp = node.get_clock().now().to_msg()
+    transforms = []
+
     root_frame = str(world.root.name)
-    if root_frame == parent_frame:
+    if root_frame != parent_frame:
+        transforms.append(_static_transform(stamp, parent_frame, root_frame))
+    if camera_target is not None:
+        transforms.append(
+            _static_transform(stamp, parent_frame, VIEWER_CAMERA_FRAME, camera_target)
+        )
+
+    if not transforms:
         return None
 
-    transform = TransformStamped()
-    transform.header.stamp = node.get_clock().now().to_msg()
-    transform.header.frame_id = parent_frame
-    transform.child_frame_id = root_frame
-    transform.transform.rotation.w = 1.0
-
     broadcaster = StaticTransformBroadcaster(node)
-    broadcaster.sendTransform(transform)
+    broadcaster.sendTransform(transforms)
     return broadcaster
 
 
-def start_visualization(world, republish_period_s=REPUBLISH_PERIOD_S):
+def start_visualization(
+    world, camera_target=None, republish_period_s=REPUBLISH_PERIOD_S
+):
     import rclpy
     from semantic_digital_twin.adapters.ros.visualization.viz_marker import (
         VizMarkerPublisher,
@@ -536,7 +561,7 @@ def start_visualization(world, republish_period_s=REPUBLISH_PERIOD_S):
     node = rclpy.create_node("viz_marker")
     _clear_markers(node)
     # Held on the node so the broadcaster outlives this call.
-    node._viewer_frame_broadcaster = _anchor_world_to_viewer_frame(node, world)
+    node._viewer_frame_broadcaster = _publish_viewer_frames(node, world, camera_target)
     marker_publisher = VizMarkerPublisher(_world=world, node=node)
     marker_publisher.with_tf_publisher()
 
@@ -558,7 +583,9 @@ def build_world(robot_name="hsrb", environment="apartment", *, visualize=True):
     caller needs.
     """
     world, robot, context = build_world_model(robot_name, environment)
-    node = start_visualization(world) if visualize else None
+    # Where the robot starts is where the action is, so the view opens there.
+    camera_target = ENVIRONMENTS[environment].robot_start
+    node = start_visualization(world, camera_target) if visualize else None
     return context, node
 
 

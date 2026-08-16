@@ -64,6 +64,15 @@ class UtteranceRole(StrEnum):
     IGNORED = "ignored"
 
 
+def _key_names(keys):
+    """Render a key set the way it appears in the model's answer.
+
+    Formatting the members directly spells them as ``<ClassName.MEMBER: 'x'>``,
+    and anything in angle brackets disappears when the reason is shown as HTML.
+    """
+    return sorted(str(key) for key in keys)
+
+
 INTERPRETATION_KEYS = frozenset(InterpretationKey)
 CONTEXT_ITEM_KEYS = frozenset(ContextItemKey)
 QUANTITY_KEYS = frozenset(QuantityKey)
@@ -227,7 +236,7 @@ def _parse_quantity(value, known_object_types) -> list[QuantityRequest]:
         if not isinstance(entry, dict) or frozenset(entry) != QUANTITY_KEYS:
             raise ValueError(
                 f"each {InterpretationKey.QUANTITY!s} item needs exactly the keys "
-                f"{sorted(QUANTITY_KEYS)}"
+                f"{_key_names(QUANTITY_KEYS)}"
             )
         name = _require_object_type(
             entry[QuantityKey.OBJECT], known_object_types, "quantity.object"
@@ -250,7 +259,7 @@ def _parse_context(value, utterance_count: int, known_object_types) -> list[Cont
         if not isinstance(entry, dict) or frozenset(entry) != CONTEXT_ITEM_KEYS:
             raise ValueError(
                 f"each {InterpretationKey.CONTEXT!s} item needs exactly the keys "
-                f"{sorted(CONTEXT_ITEM_KEYS)}"
+                f"{_key_names(CONTEXT_ITEM_KEYS)}"
             )
         index = _require_index(
             entry[ContextItemKey.UTTERANCE], utterance_count, "context.utterance"

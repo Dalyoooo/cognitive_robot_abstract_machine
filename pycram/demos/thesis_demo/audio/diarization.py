@@ -157,6 +157,17 @@ def cosine_distance(first, second) -> float:
     return float(1.0 - np.dot(first, second))
 
 
+def _distance_matrix(embeddings) -> np.ndarray:
+    """Cosine distance between every pair of already-computed embeddings."""
+    count = len(embeddings)
+    matrix = np.zeros((count, count))
+    for row in range(count):
+        for column in range(row + 1, count):
+            distance = cosine_distance(embeddings[row], embeddings[column])
+            matrix[row][column] = matrix[column][row] = distance
+    return matrix
+
+
 def pairwise_distances(segments: list[SpeechSegment], embed=None) -> np.ndarray:
     """Return the cosine distance between every pair of segments.
 
@@ -198,6 +209,18 @@ class Diarizer:
     skipped_short: list[int] = field(default_factory=list)
     """Indices the last :meth:`assign` could not judge, being too short."""
 
+    last_distances: np.ndarray | None = field(default=None)
+    """Distances between the segments the last :meth:`assign` judged.
+
+    The threshold decides where one voice ends and the next begins, and the
+    right cut depends on the microphone, the room and the speakers. Keeping the
+    measured distances lets a caller see how far the recording sat from the cut
+    that was applied, instead of only the verdict it produced.
+    """
+
+    last_judged: list[int] = field(default_factory=list)
+    """Which segment indices those distances belong to, in the same order."""
+
     def __post_init__(self):
         if self.embed is None:
             self.embed = mfcc_embedding
@@ -217,6 +240,8 @@ class Diarizer:
             return []
 
         self.skipped_short = []
+        self.last_distances = None
+        self.last_judged = []
         usable, embeddings = [], []
         for index, segment in enumerate(segments):
             if segment.duration_s < MIN_EMBEDDING_DURATION_S:
@@ -234,9 +259,13 @@ class Diarizer:
             labels[usable[0]] = FIRST_SPEAKER_LABEL
             return labels
 
+        stacked = np.vstack(embeddings)
+        self.last_distances = _distance_matrix(stacked)
+        self.last_judged = list(usable)
+
         # One run covers every segment; the loop only copies each result back to
         # the position its segment came from.
-        clustered = self._cluster(np.vstack(embeddings))
+        clustered = self._cluster(stacked)
         for position, index in enumerate(usable):
             labels[index] = int(clustered[position])
         return labels

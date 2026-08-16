@@ -24,7 +24,8 @@ Reply with exactly one JSON object and nothing else: no markdown, no explanation
 - "context" holds background utterances that change the command's outcome.
   - "effect" restates in one clause how the task changes.
   - Set "object" and "delta" together when the utterance changes *how many* are needed: "object" is the type, "delta" the change (negative for fewer, positive for more). "I already have one" is delta -1. Do not do the arithmetic yourself; state only this one utterance's change.
-  - Set both to null for any other kind of change, such as a different destination or a different object.
+  - Set both to null for any other kind of change, such as a different destination or a different object. Naming another object replaces what the command asked for; it does not add to it.
+  - A remark that something is already there never raises how many the robot brings: its delta is negative, or the pair is null.
 - "ignore" holds every remaining utterance.
 - Use only object types spelled exactly as in <world_context>, and only the utterance indices shown. Every index must appear exactly once across "command", "context" and "ignore".
 
@@ -53,6 +54,12 @@ Output: {"command":0,"quantity":[{"object":"Glass","count":5}],"context":[{"utte
 [1] "No, on the countertop."
 </utterances>
 Output: {"command":0,"quantity":[],"context":[{"utterance":1,"effect":"Put it on the countertop instead of the table.","object":null,"delta":null}],"ignore":[]}
+
+<utterances>
+[0] "Bring me a spoon."
+[1] "No, I already have a spoon, bring me a fork."
+</utterances>
+Output: {"command":0,"quantity":[{"object":"Spoon","count":1}],"context":[{"utterance":1,"effect":"Bring a fork instead of a spoon.","object":null,"delta":null}],"ignore":[]}
 """
 
 

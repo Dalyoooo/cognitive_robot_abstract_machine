@@ -30,6 +30,17 @@ DEFAULT_TEMPERATURE = 0.1
 GENERATE_UNTIL_END_OF_TEXT = -1
 """Token limit meaning "generate until the model stops"."""
 
+TRIAGE_TOKEN_LIMIT = 512
+"""Most tokens one triage answer may take.
+
+The answer is a single small JSON object, a few hundred tokens at most. Letting
+it run to the model's own stopping point sounds harmless but is not: the
+context is the model's native one, tens of thousands of tokens wide, so an
+answer that never stops keeps generating for hours with nothing to show. A cap
+this far above a real answer only ever cuts off a runaway one, which was
+unusable anyway, and turns a hang into a rejection the loop can retry.
+"""
+
 
 class Outcome(StrEnum):
     """What came of interpreting a scene."""
@@ -190,7 +201,7 @@ def interpret(
 def planner_backend(
     temperature: float = DEFAULT_TEMPERATURE,
     seed: int = 0,
-    max_tokens: int = GENERATE_UNTIL_END_OF_TEXT,
+    max_tokens: int = TRIAGE_TOKEN_LIMIT,
 ):
     """Build a ``generate`` callable backed by the planner's loaded GGUF model.
 

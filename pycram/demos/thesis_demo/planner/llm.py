@@ -15,11 +15,23 @@ from thesis_demo.validation.guard import GuardReport, inspect as inspect_plan
 from thesis_demo.validation.schema import parse_clarification, parse_plan
 
 
+PLAN_TOKEN_LIMIT = 1536
+"""Most tokens one plan may take.
+
+A plan of a dozen steps stays well under this. Leaving the limit off lets an
+answer that never stops run to the model's native context, which is tens of
+thousands of tokens wide and takes hours on the processor: a request that looks
+like a hang. Cutting off there costs nothing, because what came out was already
+too long to be valid, and a rejection is something the correction pass can act
+on.
+"""
+
+
 @dataclass(frozen=True)
 class InferenceConfiguration:
     seed: int = 0
     temperature: float = 0.1
-    max_tokens: int = -1  # -1: generate until EOS
+    max_tokens: int = PLAN_TOKEN_LIMIT
     base_seed: int | None = None
     max_attempts: int = 1
 

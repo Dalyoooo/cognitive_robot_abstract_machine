@@ -138,6 +138,25 @@ APARTMENT = EnvironmentSpec(
             (-0.05, 0.0, 0.0),
             scale=(0.18, 0.02, 0.02),
         ),
+        # Three forks, so a command asking for more than one can be carried out.
+        # They sit in the gaps between the existing cutlery, 0.05 m apart, which
+        # keeps them inside the drawer bounds the other placements already pass.
+        ContainedPlacement(
+            Fork,
+            "fork_2",
+            "cabinet10_drawer_top",
+            Drawer,
+            (-0.05, -0.05, 0.0),
+            scale=(0.18, 0.02, 0.02),
+        ),
+        ContainedPlacement(
+            Fork,
+            "fork_3",
+            "cabinet10_drawer_top",
+            Drawer,
+            (-0.05, 0.05, 0.0),
+            scale=(0.18, 0.02, 0.02),
+        ),
         ContainedPlacement(
             Knife,
             "knife",

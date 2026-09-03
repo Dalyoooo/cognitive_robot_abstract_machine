@@ -52,13 +52,21 @@ ECAPA_SOURCE = "speechbrain/spkrec-ecapa-voxceleb"
 
 DEFAULT_THRESHOLDS = {
     EmbeddingBackend.MFCC: 0.15,
-    EmbeddingBackend.ECAPA: 0.30,
+    EmbeddingBackend.ECAPA: 0.50,
 }
 """Cosine distance below which two segments count as the same voice.
 
-.. warning:: Starting points only. The right cut depends on the microphone, the
-    room and how much the voices differ, so calibrate with
-    :func:`pairwise_distances` on real recordings before trusting a speaker count.
+The ECAPA cut sat at 0.30 and split single speakers apart. Measured distances so
+far: 0.22, 0.23, 0.31 and 0.38 between segments of one voice, against 0.84 and
+0.86 between two voices. The two groups are far apart, and 0.30 fell inside the
+lower one; 0.50 sits in the gap. A short exclamation next to a spoken sentence
+is what pushes one voice up to 0.38 -- length and delivery move the distance as
+much as the person does.
+
+.. warning:: Six measurements from two recordings are a starting point, not a
+    calibration. The right cut depends on the microphone, the room and how much
+    the voices differ, so plot :func:`pairwise_distances` over real recordings
+    and put the cut where the two groups separate.
 """
 
 FALLBACK_THRESHOLD = 0.15

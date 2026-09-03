@@ -144,22 +144,9 @@ class Grounding:
                 f"nothing in this world matches {description!r}"
             ) from error
         except MultipleSolutionFound as error:
-            # Several entities match and the world context carries no qualifier
-            # that tells them apart, so this description cannot mean one rather
-            # than another and asking which is meant would be absurd. Take the
-            # first; resolve_body hands out the next one once this body has left
-            # the place it was taken from, which is what an instruction moving
-            # more than one of a kind needs.
-            bodies = [
-                annotation.root
-                for annotation in self._candidate_annotations(description)
-            ]
-            if not bodies:
-                raise GroundingError(
-                    f"nothing in this world matches {description!r}"
-                ) from error
-            self.resolved_bodies_by_description[description_identifier] = bodies[0]
-            return bodies[0]
+            raise GroundingError(
+                f"{description!r} matches several entities; the description is ambiguous"
+            ) from error
         resolved_body = annotations[0].root
         self.resolved_bodies_by_description[description_identifier] = resolved_body
         return resolved_body
@@ -174,27 +161,11 @@ class Grounding:
             if not any(
                 is_at_location(body, source_body) for source_body in source_bodies
             ):
-                # The remembered body is no longer there, which is exactly what a
-                # previous step moving it looks like. Another entity of the same
-                # kind may still be at the source, so look again before failing.
-                body = self._same_kind_still_at(description, source_bodies)
-                if body is None:
-                    raise GroundingError(
-                        f"cannot find {description!r} at {source!r}: "
-                        "not attached, inside, or supported by that location",
-                    )
-                self.resolved_bodies_by_description[description_key(description)] = body
+                raise GroundingError(
+                    f"cannot find {description!r} at {source!r}: "
+                    "not attached, inside, or supported by that location",
+                )
         return body
-
-    def _same_kind_still_at(self, description, source_bodies):
-        """Return an entity matching ``description`` that is still at a source."""
-        for annotation in self._candidate_annotations(description):
-            if any(
-                is_at_location(annotation.root, source_body)
-                for source_body in source_bodies
-            ):
-                return annotation.root
-        return None
 
     def _candidate_annotations(self, description):
         query = self._description_query(description)

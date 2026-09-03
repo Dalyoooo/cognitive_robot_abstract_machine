@@ -344,10 +344,13 @@ def parse_interpretation(
     if not isinstance(data, dict):
         raise ValueError("interpretation must be a JSON object")
     if frozenset(data) != INTERPRETATION_KEYS:
-        missing = sorted(INTERPRETATION_KEYS - frozenset(data))
+        # Spelled through _key_names for the same reason as the item messages:
+        # a raw member reads as <InterpretationKey.X: 'x'> and everything in
+        # angle brackets disappears once the reason is shown as HTML.
+        missing = _key_names(INTERPRETATION_KEYS - frozenset(data))
         extra = sorted(frozenset(data) - INTERPRETATION_KEYS)
         raise ValueError(
-            f"interpretation keys must be exactly {sorted(INTERPRETATION_KEYS)}; "
+            f"interpretation keys must be exactly {_key_names(INTERPRETATION_KEYS)}; "
             f"missing={missing}, extra={extra}"
         )
 

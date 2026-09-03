@@ -1,7 +1,7 @@
 """Validation and arithmetic for a scene interpretation.
 
-An interpretation names which utterance is the command, which others change what
-the robot should do, and which are ignored. :func:`parse_interpretation` accepts
+An interpretation names which utterance is the instruction, which others change
+what the robot should do, and which are ignored. :func:`parse_interpretation` accepts
 one only if its shape is exact, every index exists, every object type appears in
 the world context, and every utterance carries exactly one role.
 :func:`aggregate` sums the changes in how many of something is needed, and
@@ -34,7 +34,7 @@ class SpokenUtterance(Protocol):
 class InterpretationKey(StrEnum):
     """Top-level keys of an interpretation."""
 
-    COMMAND = "command"
+    INSTRUCTION = "instruction"
     QUANTITY = "quantity"
     CONTEXT = "context"
     IGNORE = "ignore"
@@ -59,7 +59,7 @@ class QuantityKey(StrEnum):
 class UtteranceRole(StrEnum):
     """The part one utterance plays in the scene."""
 
-    COMMAND = "command"
+    INSTRUCTION = "instruction"
     CONTEXT = "context"
     IGNORED = "ignored"
 
@@ -81,7 +81,7 @@ MAX_ABS_DELTA = 20
 """Largest change in a count a single utterance may claim."""
 
 MAX_COUNT = 100
-"""Largest number of one object type a command may ask for."""
+"""Largest number of one object type an instruction may ask for."""
 
 
 # %% parsed interpretation
@@ -89,18 +89,18 @@ MAX_COUNT = 100
 
 @dataclass(frozen=True)
 class QuantityRequest:
-    """How many of one object type the command itself asks for."""
+    """How many of one object type the instruction itself asks for."""
 
     object_type: str
     """Type name as spelled in the world context."""
 
     count: int
-    """Number the command asks for."""
+    """Number the instruction asks for."""
 
 
 @dataclass(frozen=True)
 class ContextItem:
-    """A background utterance kept because it changes the command's outcome."""
+    """A background utterance kept because it changes the instruction's outcome."""
 
     utterance: int
     """Index of the utterance in the scene."""
@@ -122,28 +122,28 @@ class ContextItem:
 
 @dataclass(frozen=True)
 class Interpretation:
-    """How a recorded scene splits into command, relevant context and noise.
+    """How a recorded scene splits into instruction, relevant context and noise.
 
-    Every utterance index appears exactly once across :attr:`command`,
+    Every utterance index appears exactly once across :attr:`instruction`,
     :attr:`context` and :attr:`ignore`.
     """
 
-    command: int | None
-    """Index of the commanding utterance, or None when none addresses the robot."""
+    instruction: int | None
+    """Index of the utterance that instructs the robot, or None when absent."""
 
     context: tuple[ContextItem, ...]
-    """Background utterances that change the command's outcome."""
+    """Background utterances that change the instruction's outcome."""
 
     ignore: tuple[int, ...]
     """Indices of utterances that do not affect the task."""
 
     quantity: tuple[QuantityRequest, ...] = ()
-    """Numbers the command itself asks for, empty when it names none."""
+    """Numbers the instruction itself asks for, empty when it names none."""
 
     def role_of(self, utterance: int) -> UtteranceRole:
         """Return the part the utterance at this index plays."""
-        if self.command == utterance:
-            return UtteranceRole.COMMAND
+        if self.instruction == utterance:
+            return UtteranceRole.INSTRUCTION
         if any(item.utterance == utterance for item in self.context):
             return UtteranceRole.CONTEXT
         return UtteranceRole.IGNORED
@@ -164,7 +164,7 @@ class Aggregate:
     """Net change in how many of each object type is needed."""
 
     final: dict[str, int] = field(default_factory=dict)
-    """Resulting absolute count, for object types the command gave a number for."""
+    """Resulting absolute count, for object types the instruction gave a number for."""
 
     assumed_distinct_speakers: bool = False
     """Whether claims were counted as separate people for want of voice labels.
@@ -301,10 +301,10 @@ def _parse_ignore(value, utterance_count: int) -> list[int]:
     ]
 
 
-def _check_partition(command, context_items, ignore, utterance_count: int) -> None:
+def _check_partition(instruction, context_items, ignore, utterance_count: int) -> None:
     indices = []
-    if command is not None:
-        indices.append(command)
+    if instruction is not None:
+        indices.append(instruction)
     indices.extend(item.utterance for item in context_items)
     indices.extend(ignore)
 
@@ -321,7 +321,7 @@ def _check_partition(command, context_items, ignore, utterance_count: int) -> No
     if missing:
         raise ValueError(
             f"utterance(s) {missing} left unassigned; every index must be the "
-            "command, context or ignored"
+            "instruction, context or ignored"
         )
 
 
@@ -352,23 +352,23 @@ def parse_interpretation(
         )
 
     known_types = known_object_types(context)
-    command = data[InterpretationKey.COMMAND]
-    if command is not None:
-        _require_index(command, utterance_count, InterpretationKey.COMMAND)
+    instruction = data[InterpretationKey.INSTRUCTION]
+    if instruction is not None:
+        _require_index(instruction, utterance_count, InterpretationKey.INSTRUCTION)
     quantity = _parse_quantity(data[InterpretationKey.QUANTITY], known_types)
     context_items = _parse_context(
         data[InterpretationKey.CONTEXT], utterance_count, known_types
     )
     ignore = _parse_ignore(data[InterpretationKey.IGNORE], utterance_count)
-    _check_partition(command, context_items, ignore, utterance_count)
-    if command is None and (context_items or quantity):
+    _check_partition(instruction, context_items, ignore, utterance_count)
+    if instruction is None and (context_items or quantity):
         raise ValueError(
-            "a scene without a command cannot carry 'context' or 'quantity'; "
-            "either name the command utterance or ignore everything"
+            "a scene without an instruction cannot carry 'context' or 'quantity'; "
+            "either name the instruction utterance or ignore everything"
         )
 
     return Interpretation(
-        command=command,
+        instruction=instruction,
         context=tuple(context_items),
         ignore=tuple(ignore),
         quantity=tuple(quantity),
@@ -452,7 +452,7 @@ def _quantity_clauses(summary: Aggregate) -> list[str]:
         direction = "fewer" if summary.totals[object_type] < 0 else "more"
         clauses.append(
             f"Bring {amount} {direction} {pluralize(object_type, amount)} "
-            "than the command asks for."
+            "than the instruction asks for."
         )
     return clauses
 
@@ -460,14 +460,14 @@ def _quantity_clauses(summary: Aggregate) -> list[str]:
 def fuse(
     interpretation: Interpretation, utterances: list[SpokenUtterance]
 ) -> str | None:
-    """Compose the single instruction for the planner, or None without a command.
+    """Compose the single instruction for the planner, or None without an instruction.
 
     Quantitative constraints become one counted clause per object type; every
     other constraint contributes its own clause.
     """
-    if interpretation.command is None:
+    if interpretation.instruction is None:
         return None
-    base = utterances[interpretation.command].text.strip()
+    base = utterances[interpretation.instruction].text.strip()
     summary = aggregate(interpretation, utterances)
     other_clauses = [
         item.effect.strip()

@@ -9,7 +9,7 @@ judges relevance against the object types the world actually holds.
 from thesis_demo.planner.prompt import write_context
 
 SYSTEM_PROMPT = """## Role
-A household robot recorded a short scene. It contains at most one spoken command for the robot and possibly other people talking in the background. For every utterance you decide: is it the command, relevant context that changes what the robot should do, or noise to ignore?
+A household robot recorded a short scene. It contains at most one spoken instruction for the robot and possibly other people talking in the background. For every utterance you decide: is it the instruction, relevant context that changes what the robot should do, or noise to ignore?
 
 ## Input
 - <utterances> lists what was heard. Each line is an index and the words: [i] "text".
@@ -17,49 +17,49 @@ A household robot recorded a short scene. It contains at most one spoken command
 
 ## Output
 Reply with exactly one JSON object and nothing else: no markdown, no explanation.
-{"command": <index or null>, "quantity": [{"object": "<Type>", "count": <number>}, ...], "context": [{"utterance": <index>, "effect": "<clause>", "object": <"Type" or null>, "delta": <number or null>}, ...], "ignore": [<index>, ...]}
+{"instruction": <index or null>, "quantity": [{"object": "<Type>", "count": <number>}, ...], "context": [{"utterance": <index>, "effect": "<clause>", "object": <"Type" or null>, "delta": <number or null>}, ...], "ignore": [<index>, ...]}
 
-- "command" is the index of the single utterance that tells the robot what to do, or null if none does.
-- "quantity" states how many of an object type the command itself asks for, one entry per type, or [] when it names no number. "Set the table for five people" asks for five of each type a place setting needs.
-- "context" holds background utterances that change the command's outcome.
+- "instruction" is the index of the single utterance that tells the robot what to do, or null if none does.
+- "quantity" states how many of an object type the instruction itself asks for, one entry per type, or [] when it names no number. "Set the table for five people" asks for five of each type a place setting needs.
+- "context" holds background utterances that change the instruction's outcome.
   - "effect" restates in one clause how the task changes.
   - Set "object" and "delta" together when the utterance changes *how many* are needed: "object" is the type, "delta" the change (negative for fewer, positive for more). "I already have one" is delta -1. Do not do the arithmetic yourself; state only this one utterance's change.
-  - Set both to null for any other kind of change, such as a different destination or a different object. Naming another object replaces what the command asked for; it does not add to it.
+  - Set both to null for any other kind of change, such as a different destination or a different object. Naming another object replaces what the instruction asked for; it does not add to it.
   - A remark that something is already there never raises how many the robot brings: its delta is negative, or the pair is null.
 - "ignore" holds every remaining utterance.
-- Use only object types spelled exactly as in <world_context>, and only the utterance indices shown. Every index must appear exactly once across "command", "context" and "ignore".
+- Use only object types spelled exactly as in <world_context>, and only the utterance indices shown. Every index must appear exactly once across "instruction", "context" and "ignore".
 
 ## Deciding relevance
-- Keep a background utterance as context only when it refers to the objects or task in <world_context> and changes what the robot fetches or places, or how many. "He already has a glass" changes how many glasses are needed. "The weather is nice" changes nothing: ignore it.
+- Keep a background utterance as context only when it refers to the objects or task in <world_context> and changes what the robot fetches or places, or how many. "He already has a glass" changes how many glasses are needed. "The weather is nice" changes nothing: assign it the `ignore` role.
 - When unsure whether a remark affects the task, ignore it rather than invent an effect.
 - Never invent utterances, indices or object types.
 
 ## Examples
 <utterances>
-[0] "Set the table."
-[1] "He already has a glass."
+[0] "Put two forks on the table."
+[1] "He already has a fork."
 [2] "The weather will be sunny tomorrow."
 </utterances>
-Output: {"command":0,"quantity":[],"context":[{"utterance":1,"effect":"One person already has a glass, so bring one less.","object":"Glass","delta":-1}],"ignore":[2]}
+Output: {"instruction":0,"quantity":[],"context":[{"utterance":1,"effect":"One person already has a fork, so bring one less.","object":"Fork","delta":-1}],"ignore":[2]}
 
 <utterances>
 [0] "Set the table for five people."
 [1] "I already have one!"
 [2] "I already have one!"
 </utterances>
-Output: {"command":0,"quantity":[{"object":"Glass","count":5}],"context":[{"utterance":1,"effect":"One person already has a glass.","object":"Glass","delta":-1},{"utterance":2,"effect":"One person already has a glass.","object":"Glass","delta":-1}],"ignore":[]}
+Output: {"instruction":0,"quantity":[{"object":"Glass","count":5}],"context":[{"utterance":1,"effect":"One person already has a glass.","object":"Glass","delta":-1},{"utterance":2,"effect":"One person already has a glass.","object":"Glass","delta":-1}],"ignore":[]}
 
 <utterances>
-[0] "Put the cup on the table."
+[0] "Put the fork on the table."
 [1] "No, on the countertop."
 </utterances>
-Output: {"command":0,"quantity":[],"context":[{"utterance":1,"effect":"Put it on the countertop instead of the table.","object":null,"delta":null}],"ignore":[]}
+Output: {"instruction":0,"quantity":[],"context":[{"utterance":1,"effect":"Put it on the countertop instead of the table.","object":null,"delta":null}],"ignore":[]}
 
 <utterances>
 [0] "Bring me a spoon."
 [1] "No, I already have a spoon, bring me a fork."
 </utterances>
-Output: {"command":0,"quantity":[{"object":"Spoon","count":1}],"context":[{"utterance":1,"effect":"Bring a fork instead of a spoon.","object":null,"delta":null}],"ignore":[]}
+Output: {"instruction":0,"quantity":[{"object":"Spoon","count":1}],"context":[{"utterance":1,"effect":"Bring a fork instead of a spoon.","object":null,"delta":null}],"ignore":[]}
 """
 
 

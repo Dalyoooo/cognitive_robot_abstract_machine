@@ -22,7 +22,6 @@ from thesis_demo.config import select_backend
 MODEL_NAME = "small"  # faster-whisper model size
 FFMPEG_TIMEOUT_S = 30
 
-
 def default_work_dir():
     """Return the fallback recording directory when no caller supplies one."""
     return Path(tempfile.gettempdir()) / "thesis_demo_recordings"

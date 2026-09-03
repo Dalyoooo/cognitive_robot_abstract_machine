@@ -46,7 +46,7 @@ class Outcome(StrEnum):
     """What came of interpreting a scene."""
 
     OK = "ok"
-    NO_COMMAND = "no_command"
+    NO_INSTRUCTION = "no_instruction"
     ERROR = "error"
 
 
@@ -73,16 +73,16 @@ class InterpretationResult:
     """The triage of one scene, whether or not it succeeded."""
 
     outcome: Outcome
-    """Whether a command was found, none was, or no valid answer arrived."""
+    """Whether an instruction was found, none was, or no valid answer arrived."""
 
     instruction: str | None
-    """The single sentence for the planner, absent without a command."""
+    """The single sentence for the planner, absent without an instruction."""
 
     interpretation: Interpretation | None
     """The validated interpretation, absent on :attr:`Outcome.ERROR`."""
 
-    command_text: str | None
-    """Words of the commanding utterance."""
+    instruction_text: str | None
+    """Words of the utterance that instructs the robot."""
 
     constraints: tuple[str, ...]
     """Effect of every accepted background utterance, in the order heard."""
@@ -136,7 +136,7 @@ def interpret(
     generate,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
 ) -> InterpretationResult:
-    """Triage a recorded scene into command, relevant context and noise.
+    """Triage a recorded scene into instruction, relevant context and noise.
 
     :param generate: maps a list of chat messages to the model's raw text reply.
         Passing it in keeps this loop independent of any particular model.
@@ -171,7 +171,7 @@ def interpret(
             outcome=Outcome.ERROR,
             instruction=None,
             interpretation=None,
-            command_text=None,
+            instruction_text=None,
             constraints=(),
             ignored=(),
             raw_response=raw_response,
@@ -179,13 +179,15 @@ def interpret(
             rejection_reason=attempt_reasons[-1] if attempt_reasons else "unknown",
         )
 
-    has_command = interpretation.command is not None
+    has_instruction = interpretation.instruction is not None
     return InterpretationResult(
-        outcome=Outcome.OK if has_command else Outcome.NO_COMMAND,
+        outcome=Outcome.OK if has_instruction else Outcome.NO_INSTRUCTION,
         instruction=fuse(interpretation, utterances),
         interpretation=interpretation,
-        command_text=(
-            utterances[interpretation.command].text if has_command else None
+        instruction_text=(
+            utterances[interpretation.instruction].text
+            if has_instruction
+            else None
         ),
         constraints=tuple(item.effect for item in interpretation.context),
         ignored=tuple(utterances[index].text for index in interpretation.ignore),

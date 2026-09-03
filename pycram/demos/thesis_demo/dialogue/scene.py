@@ -23,7 +23,7 @@ def understand_scene(
 
     Runs the whole speech front-end: voice-activity segmentation, per-segment
     transcription, optional grouping of segments by voice, then the
-    context-aware interpretation that keeps the command, folds relevant
+    context-aware interpretation that keeps the instruction, folds relevant
     background remarks into it and drops noise. Returns the list of transcribed
     utterances together with the :class:`InterpretationResult`; the result's
     ``instruction`` is what feeds ``plan()``.

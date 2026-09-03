@@ -47,6 +47,14 @@ class DistanceMetric(StrEnum):
 ECAPA_MODEL_DIR_VARIABLE = "ECAPA_MODEL_DIR"
 """Environment variable naming a directory the ECAPA weights already live in."""
 
+THRESHOLD_VARIABLE = "VAD_VOICE_CUTOFF"
+"""Environment variable overriding the cosine cutoff for every backend.
+
+The right cut is a measurement, not a constant, and finding it means trying
+values against the same recordings. Reading it from the environment keeps that
+a one-line change instead of an edit plus a rebuild of the lab image.
+"""
+
 ECAPA_SOURCE = "speechbrain/spkrec-ecapa-voxceleb"
 """Model the ECAPA backend loads."""
 
@@ -298,6 +306,31 @@ class Diarizer:
         return renumbered
 
 
+def configured_threshold() -> float | None:
+    """Return the cutoff :data:`THRESHOLD_VARIABLE` asks for, or None.
+
+    :raises ValueError: when the variable is set but not a usable distance.
+    """
+    # A variable set to nothing is how a shell says "leave it alone", so an
+    # empty or blank setting means the backend default rather than an error.
+    raw = os.environ.get(THRESHOLD_VARIABLE, "").strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        raise ValueError(
+            f"{THRESHOLD_VARIABLE}={raw!r} is not a number; a cosine distance "
+            "between 0 and 2 was expected"
+        ) from None
+    if not 0.0 < value < 2.0:
+        raise ValueError(
+            f"{THRESHOLD_VARIABLE}={value} lies outside the range a cosine "
+            "distance can take; 0 would keep nothing together and 2 everything"
+        )
+    return value
+
+
 def load_diarizer(
     backend: EmbeddingBackend = EmbeddingBackend.MFCC, threshold: float = None
 ) -> Diarizer:
@@ -306,6 +339,8 @@ def load_diarizer(
     :raises ValueError: for a backend that does not exist.
     """
     backend = EmbeddingBackend(backend)
+    if threshold is None:
+        threshold = configured_threshold()
     if backend is EmbeddingBackend.MFCC:
         return Diarizer(
             embed=mfcc_embedding, threshold=threshold, backend_name=backend

@@ -27,9 +27,10 @@ Reply with exactly one JSON object and nothing else: no markdown, no explanation
   - Set "object" and "delta" together when the utterance changes *how many* are needed: "object" is the type, "delta" the change (negative for fewer, positive for more). "I already have one" is delta -1. Do not do the arithmetic yourself; state only this one utterance's change.
   - Set both to null for any other kind of change, such as a different destination or a different object. Naming another object replaces what the instruction asked for; it does not add to it.
   - A remark that something is already there never raises how many the robot brings: its delta is negative, or the pair is null.
+  - When the instruction utterance itself says that something is already there, write a context item whose "utterance" is the instruction's own index. That one utterance then gives both the number asked for in "quantity" and the change in "context".
 - "ignore" holds every remaining utterance.
 - The instruction index and every context index are already assigned; never repeat them in "ignore".
-- Use only object types spelled exactly as in <world_context>, and only the utterance indices shown. Every index must appear exactly once across "instruction", "context" and "ignore".
+- Use only object types spelled exactly as in <world_context>, and only the utterance indices shown. Every index appears once across "instruction", "context" and "ignore"; only the instruction's own index may appear a second time, in "context".
 
 ## Deciding relevance
 - Keep a background utterance as context only when it refers to the objects or task in <world_context> and changes what the robot fetches or places, or how many. "He already has a glass" changes how many glasses are needed. "The weather is nice" changes nothing: assign it the `ignore` role.
@@ -76,6 +77,11 @@ Output: {"instruction":0,"quantity":[{"object":"Bowl","count":1}],"context":[{"u
 [1] "Oh no, I mean put a mug on the table."
 </utterances>
 Output: {"instruction":0,"quantity":[{"object":"Glass","count":1}],"context":[{"utterance":1,"effect":"Put a mug on the table instead of a glass.","object":null,"delta":null}],"ignore":[]}
+
+<utterances>
+[0] "Put two spoons on the table. I know, I already have one."
+</utterances>
+Output: {"instruction":0,"quantity":[{"object":"Spoon","count":2}],"context":[{"utterance":0,"effect":"One spoon is already there.","object":"Spoon","delta":-1}],"ignore":[]}
 """
 
 

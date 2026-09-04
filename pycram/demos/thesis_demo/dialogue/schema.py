@@ -3,7 +3,9 @@
 An interpretation names which utterance is the instruction, which others change
 what the robot should do, and which are ignored. :func:`parse_interpretation` accepts
 one only if its shape is exact, every index exists, every object type appears in
-the world context, and every utterance carries exactly one role.
+the world context, and every utterance carries one role, the instruction aside:
+an utterance that both orders and corrects itself is instruction and context at
+once.
 :func:`aggregate` sums the changes in how many of something is needed, and
 :func:`fuse` writes the instruction handed to the planner.
 """
@@ -124,8 +126,10 @@ class ContextItem:
 class Interpretation:
     """How a recorded scene splits into instruction, relevant context and noise.
 
-    Every utterance index appears exactly once across :attr:`instruction`,
-    :attr:`context` and :attr:`ignore`.
+    Every utterance index appears once across :attr:`instruction`,
+    :attr:`context` and :attr:`ignore`, except the instruction's own index,
+    which may also appear in :attr:`context` when that utterance corrects
+    itself.
     """
 
     instruction: int | None
@@ -302,12 +306,18 @@ def _parse_ignore(value, utterance_count: int) -> list[int]:
 
 
 def _check_partition(instruction, context_items, ignore, utterance_count: int) -> None:
-    indices = []
-    if instruction is not None:
-        indices.append(instruction)
-    indices.extend(item.utterance for item in context_items)
-    indices.extend(ignore)
+    """Check that every utterance index carries a role, and only one.
 
+    The instruction is the exception: a speaker who corrects themselves without
+    pausing leaves the order and the correction in one utterance, so that index
+    may also carry a context item. It can never be ignored.
+    """
+    if instruction is not None and instruction in ignore:
+        raise ValueError(
+            f"utterance {instruction} is the instruction, so it cannot also be ignored"
+        )
+
+    indices = [item.utterance for item in context_items] + list(ignore)
     seen, duplicates = set(), set()
     for index in indices:
         if index in seen:
@@ -317,6 +327,8 @@ def _check_partition(instruction, context_items, ignore, utterance_count: int) -
         raise ValueError(
             f"utterance(s) {sorted(duplicates)} assigned to more than one role"
         )
+    if instruction is not None:
+        seen.add(instruction)
     missing = sorted(set(range(utterance_count)) - seen)
     if missing:
         raise ValueError(

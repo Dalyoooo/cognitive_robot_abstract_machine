@@ -12,6 +12,7 @@ numbers the groups.
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -20,7 +21,7 @@ from pathlib import Path
 import librosa
 import numpy as np
 
-from thesis_demo.audio.vad import SAMPLING_RATE, SpeechSegment
+from thesis_demo.audio.vad import SAMPLING_RATE, SpeechSegment, segment_file
 
 # %% configuration
 
@@ -60,21 +61,24 @@ ECAPA_SOURCE = "speechbrain/spkrec-ecapa-voxceleb"
 
 DEFAULT_THRESHOLDS = {
     EmbeddingBackend.MFCC: 0.15,
-    EmbeddingBackend.ECAPA: 0.50,
+    EmbeddingBackend.ECAPA: 0.65,
 }
 """Cosine distance below which two segments count as the same voice.
 
-The ECAPA cut sat at 0.30 and split single speakers apart. Measured distances so
-far: 0.22, 0.23, 0.31 and 0.38 between segments of one voice, against 0.84 and
-0.86 between two voices. The two groups are far apart, and 0.30 fell inside the
-lower one; 0.50 sits in the gap. A short exclamation next to a spoken sentence
-is what pushes one voice up to 0.38 -- length and delivery move the distance as
-much as the person does.
+Measured between segments of one voice: 0.22, 0.23, 0.31 and 0.38 on a local
+microphone, and 0.59 through the lab's browser recorder, which carries the voice
+as Opus at a lower bandwidth. Between two voices: 0.84 and 0.86. The cut sits at
+0.65, in the gap that is left once the browser channel is counted; 0.50 fell
+inside the same-voice group there and split one speaker into three.
 
-.. warning:: Six measurements from two recordings are a starting point, not a
-    calibration. The right cut depends on the microphone, the room and how much
-    the voices differ, so plot :func:`pairwise_distances` over real recordings
-    and put the cut where the two groups separate.
+Length moves the distance as much as the person does: a 0.78 s filler measured
+0.66 and 0.74 against the same speaker's sentences. That is what
+:data:`MIN_ANCHOR_DURATION_S` answers, so the cut did not have to absorb it.
+
+.. warning:: A handful of measurements from a few recordings is a starting
+    point, not a calibration. The right cut depends on the microphone, the room
+    and how much the voices differ, so run this module over real recordings
+    (see its command line) and put the cut where the two groups separate.
 """
 
 FALLBACK_THRESHOLD = 0.15
@@ -82,6 +86,15 @@ FALLBACK_THRESHOLD = 0.15
 
 MIN_EMBEDDING_DURATION_S = 0.3
 """Shortest segment a voice can be judged from."""
+
+MIN_ANCHOR_DURATION_S = 1.0
+"""Shortest segment that may found a voice of its own.
+
+The embedding of a sub-second snippet describes the snippet nearly as much as
+the person, so a filler like "Um" lands far from the same speaker's sentences.
+Such a segment may still join the voice it is closest to, but it can no longer
+start a new one and pull a scene apart.
+"""
 
 MFCC_COEFFICIENT_COUNT = 20
 """Coefficients per analysis window in the MFCC baseline."""
@@ -194,13 +207,7 @@ def pairwise_distances(segments: list[SpeechSegment], embed=None) -> np.ndarray:
     embeddings = [
         embed(segment.samples, segment.sampling_rate) for segment in segments
     ]
-    count = len(embeddings)
-    matrix = np.zeros((count, count))
-    for row in range(count):
-        for column in range(row + 1, count):
-            distance = cosine_distance(embeddings[row], embeddings[column])
-            matrix[row][column] = matrix[column][row] = distance
-    return matrix
+    return _distance_matrix(embeddings)
 
 
 # %% grouping
@@ -237,6 +244,14 @@ class Diarizer:
     last_judged: list[int] = field(default_factory=list)
     """Which segment indices those distances belong to, in the same order."""
 
+    attached: list[int] = field(default_factory=list)
+    """Indices the last :meth:`assign` joined to a voice instead of clustering.
+
+    These are the segments too short to found a voice. Their label was decided
+    by proximity to a longer one, which is a weaker claim than a clustered
+    label, so a caller can say so rather than presenting both alike.
+    """
+
     def __post_init__(self):
         if self.embed is None:
             self.embed = mfcc_embedding
@@ -248,14 +263,18 @@ class Diarizer:
     def assign(self, segments: list[SpeechSegment]) -> list[int | None]:
         """Return one speaker label per segment, numbered in order of appearance.
 
-        .. note:: A segment shorter than :data:`MIN_EMBEDDING_DURATION_S` gets
-            None rather than a guessed label, so a caller can see that the voice
-            is unknown.
+        Segments long enough to found a voice are clustered; shorter ones join
+        the voice they are closest to, so a filler cannot become a speaker.
+
+        .. note:: A segment shorter than :data:`MIN_EMBEDDING_DURATION_S`, or one
+            close to no voice at all, gets None rather than a guessed label, so
+            a caller can see that the voice is unknown.
         """
         if not segments:
             return []
 
         self.skipped_short = []
+        self.attached = []
         self.last_distances = None
         self.last_judged = []
         usable, embeddings = [], []
@@ -279,12 +298,59 @@ class Diarizer:
         self.last_distances = _distance_matrix(stacked)
         self.last_judged = list(usable)
 
-        # One run covers every segment; the loop only copies each result back to
+        # Positions within `usable`, not indices into `segments`.
+        anchors = [
+            position
+            for position, index in enumerate(usable)
+            if segments[index].duration_s >= MIN_ANCHOR_DURATION_S
+        ]
+        # Nothing long enough to anchor: the short segments are all the recording
+        # holds, so they are judged against each other rather than left unknown.
+        if not anchors:
+            anchors = list(range(len(usable)))
+        anchored = set(anchors)
+        joiners = [
+            position for position in range(len(usable)) if position not in anchored
+        ]
+
+        # One run covers every anchor; the loop only copies each result back to
         # the position its segment came from.
-        clustered = self._cluster(stacked)
-        for position, index in enumerate(usable):
-            labels[index] = int(clustered[position])
+        voices = (
+            [FIRST_SPEAKER_LABEL]
+            if len(anchors) == 1
+            else self._cluster(stacked[anchors])
+        )
+        for position, voice in zip(anchors, voices):
+            labels[usable[position]] = int(voice)
+
+        for position in joiners:
+            voice = self._closest_voice(position, anchors, voices)
+            if voice is not None:
+                self.attached.append(usable[position])
+            labels[usable[position]] = voice
         return labels
+
+    def _closest_voice(self, position, anchors, voices) -> int | None:
+        """Return the voice a short segment belongs to, or None if none is close.
+
+        The distance to a voice is the mean distance to its anchors, matching the
+        average linkage the clustering itself uses.
+        """
+        distances_per_voice: dict[int, list[float]] = {}
+        for anchor, voice in zip(anchors, voices):
+            distances_per_voice.setdefault(int(voice), []).append(
+                float(self.last_distances[position][anchor])
+            )
+        voice, mean = min(
+            (
+                (voice, sum(distances) / len(distances))
+                for voice, distances in distances_per_voice.items()
+            ),
+            key=lambda candidate: candidate[1],
+        )
+        # Joining the nearest voice whatever the distance would give every filler
+        # a speaker; beyond the cutoff the honest answer is that it is unknown.
+        return voice if mean < self.threshold else None
 
     def _cluster(self, embeddings) -> list[int]:
         from sklearn.cluster import AgglomerativeClustering
@@ -348,3 +414,61 @@ def load_diarizer(
     return Diarizer(
         embed=ecapa_embedding_backend(), threshold=threshold, backend_name=backend
     )
+
+
+# %% command line
+
+
+def _print_measurements(path: str, backend: EmbeddingBackend) -> None:
+    """Print what a recording measured, which is how a cutoff gets chosen.
+
+    The verdict alone cannot be argued with. The durations say which segments
+    were allowed to found a voice, and the matrix says how far apart the
+    recording actually sat from the cutoff that was applied to it.
+    """
+    diarizer = load_diarizer(backend)
+    segments = segment_file(path)
+    labels = diarizer.assign(segments)
+
+    print(f"{len(segments)} speech segment(s), {backend.value} embeddings, "
+          f"cutoff {diarizer.threshold:.2f}:")
+    for index, segment in enumerate(segments):
+        label = labels[index]
+        voice = f"voice {label}" if label is not None else "voice unknown"
+        if index in diarizer.attached:
+            voice += " (short, joined)"
+        elif index in diarizer.skipped_short:
+            voice += " (too short to judge)"
+        print(
+            f"  [{index}] {segment.start_s:6.2f}s - {segment.end_s:6.2f}s "
+            f"({segment.duration_s:4.2f}s)  {voice}"
+        )
+
+    judged = diarizer.last_judged
+    if diarizer.last_distances is None or len(judged) < 2:
+        print("\nnot enough judged segments to measure a distance")
+        return
+
+    print("\ncosine distance between judged segments:")
+    print("       " + "".join(f"[{index:>3}]" for index in judged))
+    for row, index in enumerate(judged):
+        cells = "".join(
+            f"{diarizer.last_distances[row][column]:>5.2f}"
+            for column in range(len(judged))
+        )
+        print(f"  [{index:>3}]{cells}")
+
+
+if __name__ == "__main__":
+
+    if not 2 <= len(sys.argv) <= 3:
+        print(
+            "usage: python -m thesis_demo.audio.diarization <audio-file> "
+            "[mfcc|ecapa]"
+        )
+        raise SystemExit(2)
+
+    chosen = (
+        EmbeddingBackend(sys.argv[2]) if len(sys.argv) == 3 else EmbeddingBackend.MFCC
+    )
+    _print_measurements(sys.argv[1], chosen)

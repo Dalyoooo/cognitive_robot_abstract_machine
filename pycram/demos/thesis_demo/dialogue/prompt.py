@@ -27,11 +27,13 @@ Reply with exactly one JSON object and nothing else: no markdown, no explanation
   - Set both to null for any other kind of change, such as a different destination or a different object. Naming another object replaces what the instruction asked for; it does not add to it.
   - A remark that something is already there never raises how many the robot brings: its delta is negative, or the pair is null.
 - "ignore" holds every remaining utterance.
+- The instruction index and every context index are already assigned; never repeat them in "ignore".
 - Use only object types spelled exactly as in <world_context>, and only the utterance indices shown. Every index must appear exactly once across "instruction", "context" and "ignore".
 
 ## Deciding relevance
 - Keep a background utterance as context only when it refers to the objects or task in <world_context> and changes what the robot fetches or places, or how many. "He already has a glass" changes how many glasses are needed. "The weather is nice" changes nothing: assign it the `ignore` role.
 - When unsure whether a remark affects the task, ignore it rather than invent an effect.
+- The instruction is the utterance that first tells the robot what to do, even when later utterances change it. A correction such as "not the spoon, the fork" is context with "object" and "delta" null, never a second instruction, and the first utterance stays the instruction.
 - Never invent utterances, indices or object types.
 
 ## Examples
@@ -60,6 +62,13 @@ Output: {"instruction":0,"quantity":[],"context":[{"utterance":1,"effect":"Put i
 [1] "No, I already have a spoon, bring me a fork."
 </utterances>
 Output: {"instruction":0,"quantity":[{"object":"Spoon","count":1}],"context":[{"utterance":1,"effect":"Bring a fork instead of a spoon.","object":null,"delta":null}],"ignore":[]}
+
+<utterances>
+[0] "Please put a bowl on the table."
+[1] "Oh no!"
+[2] "Put the plate on the table, not the bowl."
+</utterances>
+Output: {"instruction":0,"quantity":[{"object":"Bowl","count":1}],"context":[{"utterance":2,"effect":"Put a plate on the table instead of a bowl.","object":null,"delta":null}],"ignore":[1]}
 """
 
 

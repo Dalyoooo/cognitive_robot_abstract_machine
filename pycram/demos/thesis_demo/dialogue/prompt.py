@@ -19,7 +19,8 @@ A household robot recorded a short scene. It contains at most one spoken instruc
 Reply with exactly one JSON object and nothing else: no markdown, no explanation.
 {"instruction": <index or null>, "quantity": [{"object": "<Type>", "count": <number>}, ...], "context": [{"utterance": <index>, "effect": "<clause>", "object": <"Type" or null>, "delta": <number or null>}, ...], "ignore": [<index>, ...]}
 
-- "instruction" is the index of the single utterance that tells the robot what to do, or null if none does.
+- Every key shown above must appear in every object you write, even when its value is null. Writing null is required; leaving a key out is not allowed.
+- "instruction" is the index of the single utterance that tells the robot what to do, or null if none does. When more than one utterance gives an order, the instruction is the earliest one and the later ones are corrections that belong in "context".
 - "quantity" states how many of an object type the instruction itself asks for, one entry per type, or [] when it names no number. "Set the table for five people" asks for five of each type a place setting needs.
 - "context" holds background utterances that change the instruction's outcome.
   - "effect" restates in one clause how the task changes.
@@ -33,7 +34,7 @@ Reply with exactly one JSON object and nothing else: no markdown, no explanation
 ## Deciding relevance
 - Keep a background utterance as context only when it refers to the objects or task in <world_context> and changes what the robot fetches or places, or how many. "He already has a glass" changes how many glasses are needed. "The weather is nice" changes nothing: assign it the `ignore` role.
 - When unsure whether a remark affects the task, ignore it rather than invent an effect.
-- The instruction is the utterance that first tells the robot what to do, even when later utterances change it. A correction such as "not the spoon, the fork" is context with "object" and "delta" null, never a second instruction, and the first utterance stays the instruction.
+- A correction is still context even when it is a complete order by itself. "Oh no, I mean put a spoon on the table" and "not the spoon, the fork" both keep the earlier utterance as the instruction and become a context item whose "effect" says what to do instead, with "object" and "delta" null.
 - Never invent utterances, indices or object types.
 
 ## Examples
@@ -69,7 +70,30 @@ Output: {"instruction":0,"quantity":[{"object":"Spoon","count":1}],"context":[{"
 [2] "Put the plate on the table, not the bowl."
 </utterances>
 Output: {"instruction":0,"quantity":[{"object":"Bowl","count":1}],"context":[{"utterance":2,"effect":"Put a plate on the table instead of a bowl.","object":null,"delta":null}],"ignore":[1]}
+
+<utterances>
+[0] "Please put a glass on the table."
+[1] "Oh no, I mean put a mug on the table."
+</utterances>
+Output: {"instruction":0,"quantity":[{"object":"Glass","count":1}],"context":[{"utterance":1,"effect":"Put a mug on the table instead of a glass.","object":null,"delta":null}],"ignore":[]}
 """
+
+
+def _answer_shape() -> str:
+    """Lift the required answer shape back out of the system prompt.
+
+    A rejection repeats the shape to the model, and reading it from the prompt
+    rather than restating it keeps the two from drifting apart when the payload
+    gains a key.
+    """
+    for line in SYSTEM_PROMPT.splitlines():
+        if line.startswith('{"instruction"'):
+            return line
+    raise AssertionError("the system prompt no longer states the answer shape")
+
+
+ANSWER_SHAPE = _answer_shape()
+"""The one-line JSON template the model must answer with."""
 
 
 def system_prompt():

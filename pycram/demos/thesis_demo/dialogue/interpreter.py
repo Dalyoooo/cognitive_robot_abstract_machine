@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass
 from enum import StrEnum
 
-from thesis_demo.dialogue.prompt import system_prompt, user_turn
+from thesis_demo.dialogue.prompt import ANSWER_SHAPE, system_prompt, user_turn
 from thesis_demo.dialogue.schema import (
     Aggregate,
     Interpretation,
@@ -109,9 +109,10 @@ class InterpretationResult:
 def _correction_message(reason: str) -> str:
     return (
         f"Your answer was rejected: {reason}\n"
-        "Reply again with exactly one JSON object of the required shape. "
-        "Use only the utterance indices shown and assign every index exactly "
-        "once. No explanation, no markdown."
+        f"Reply again with exactly one JSON object of this shape:\n{ANSWER_SHAPE}\n"
+        "Write every key shown, using null where a value is absent; never leave "
+        "a key out. Use only the utterance indices shown and assign every index "
+        "exactly once. No explanation, no markdown."
     )
 
 

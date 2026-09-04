@@ -61,19 +61,27 @@ ECAPA_SOURCE = "speechbrain/spkrec-ecapa-voxceleb"
 
 DEFAULT_THRESHOLDS = {
     EmbeddingBackend.MFCC: 0.15,
-    EmbeddingBackend.ECAPA: 0.65,
+    EmbeddingBackend.ECAPA: 0.72,
 }
 """Cosine distance below which two segments count as the same voice.
 
-Measured between segments of one voice: 0.22, 0.23, 0.31 and 0.38 on a local
-microphone, and 0.59 through the lab's browser recorder, which carries the voice
-as Opus at a lower bandwidth. Between two voices: 0.84 and 0.86. The cut sits at
-0.65, in the gap that is left once the browser channel is counted; 0.50 fell
-inside the same-voice group there and split one speaker into three.
+One voice measures much wider through the lab's browser recorder than through a
+local microphone, because the voice reaches the pipeline as Opus rather than as
+it was spoken. Measured between segments of a single speaker: 0.22, 0.23, 0.31
+and 0.38 locally; 0.59 to 0.74 through the browser while it still cancelled echo
+and rode the gain; 0.48 to 0.64 once that was switched off. Between two
+speakers, through the same browser channel: 0.84 and 0.86.
 
-Length moves the distance as much as the person does: a 0.78 s filler measured
-0.66 and 0.74 against the same speaker's sentences. That is what
-:data:`MIN_ANCHOR_DURATION_S` answers, so the cut did not have to absorb it.
+The cut sits at 0.72, near the middle of what is left between those two groups.
+Every earlier value was inside the same-voice range rather than above it: 0.30
+and 0.50 each split one speaker into three, and 0.65 cleared the widest
+same-voice pair by 0.01, which is luck and not a margin.
+
+Length moves the distance as much as the person does. The widest pair a single
+speaker produced, 0.64, was between his two shortest and most hesitant
+fragments, while his two full sentences sat at 0.49. A 0.78 s filler reached
+0.74. That is what :data:`MIN_ANCHOR_DURATION_S` answers, so the cut does not
+have to absorb it.
 
 .. warning:: A handful of measurements from a few recordings is a starting
     point, not a calibration. The right cut depends on the microphone, the room

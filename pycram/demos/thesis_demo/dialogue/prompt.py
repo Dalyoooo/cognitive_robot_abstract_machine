@@ -25,8 +25,10 @@ Reply with exactly one JSON object and nothing else: no markdown, no explanation
 - "context" holds background utterances that change the instruction's outcome.
   - "effect" restates in one clause how the task changes.
   - Set "object" and "delta" together when the utterance changes *how many* are needed: "object" is the type, "delta" the change (negative for fewer, positive for more). "I already have one" is delta -1. Do not do the arithmetic yourself; state only this one utterance's change.
+  - "delta" never depends on how many the instruction asked for. "Put three spoons on the table" followed by "I already have one spoon" is delta -1, never -2: -2 is the subtraction 3 - 1, which is not yours to make. One utterance never changes the count by more than the number it names, and an utterance naming no number changes it by one.
   - Set both to null for any other kind of change, such as a different destination or a different object. Naming another object replaces what the instruction asked for; it does not add to it.
   - A remark that something is already there never raises how many the robot brings: its delta is negative, or the pair is null.
+  - A person joining or dropping out changes how many are needed by one: "Today Anna is also coming" is delta +1, "Anna isn't coming today" is delta -1. Who they are does not matter, only that there is one more or one fewer.
   - When the instruction utterance itself says that something is already there, write a context item whose "utterance" is the instruction's own index. That one utterance then gives both the number asked for in "quantity" and the change in "context".
 - "ignore" holds every remaining utterance.
 - The instruction index and every context index are already assigned; never repeat them in "ignore".
@@ -82,6 +84,25 @@ Output: {"instruction":0,"quantity":[{"object":"Glass","count":1}],"context":[{"
 [0] "Put two spoons on the table. I know, I already have one."
 </utterances>
 Output: {"instruction":0,"quantity":[{"object":"Spoon","count":2}],"context":[{"utterance":0,"effect":"One spoon is already there.","object":"Spoon","delta":-1}],"ignore":[]}
+
+<utterances>
+[0] "Please put three spoons on the table."
+[1] "I already have one spoon."
+[2] "I also already have one spoon."
+</utterances>
+Output: {"instruction":0,"quantity":[{"object":"Spoon","count":3}],"context":[{"utterance":1,"effect":"One spoon is already there, so bring one less.","object":"Spoon","delta":-1},{"utterance":2,"effect":"Another spoon is already there, so bring one less.","object":"Spoon","delta":-1}],"ignore":[]}
+
+<utterances>
+[0] "Please put 3 spoons on the table."
+[1] "Oh, today Anna is also coming."
+</utterances>
+Output: {"instruction":0,"quantity":[{"object":"Spoon","count":3}],"context":[{"utterance":1,"effect":"One more person is coming, so bring one more.","object":"Spoon","delta":1}],"ignore":[]}
+
+<utterances>
+[0] "Please put 3 spoons on the table."
+[1] "Anna isn't coming today."
+</utterances>
+Output: {"instruction":0,"quantity":[{"object":"Spoon","count":3}],"context":[{"utterance":1,"effect":"One person fewer is coming, so bring one less.","object":"Spoon","delta":-1}],"ignore":[]}
 """
 
 

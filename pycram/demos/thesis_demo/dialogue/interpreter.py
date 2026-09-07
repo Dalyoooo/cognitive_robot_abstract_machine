@@ -17,6 +17,7 @@ from thesis_demo.dialogue.schema import (
     Interpretation,
     SpokenUtterance,
     aggregate,
+    check_deltas_are_supported,
     fuse,
     parse_interpretation,
 )
@@ -120,13 +121,22 @@ def _chat_message(role: MessageRole, content: str) -> dict[str, str]:
     return {MessageKey.ROLE: role.value, MessageKey.CONTENT: content}
 
 
-def _parse(raw_response: str, utterance_count: int, context):
+def _parse(raw_response: str, utterances: list[SpokenUtterance], context):
+    """Turn one raw answer into an interpretation, or into a reason to refuse it.
+
+    The believability check runs here rather than inside
+    :func:`parse_interpretation` because it reads the transcript, not the
+    payload; raising the same ``ValueError`` puts it on the same footing as
+    every other rejection, so the loop below retries it unchanged.
+    """
     try:
         data = json.loads(raw_response.strip())
     except json.JSONDecodeError:
         return None, "Output must be exactly one JSON object."
     try:
-        return parse_interpretation(data, utterance_count, context), None
+        interpretation = parse_interpretation(data, len(utterances), context)
+        check_deltas_are_supported(interpretation, utterances)
+        return interpretation, None
     except (ValueError, KeyError, TypeError) as error:
         return None, str(error)
 
@@ -157,7 +167,7 @@ def interpret(
     for attempt in range(1, max_attempts + 1):
         attempts = attempt
         raw_response = generate(messages)
-        interpretation, reason = _parse(raw_response, len(utterances), context)
+        interpretation, reason = _parse(raw_response, utterances, context)
         if interpretation is not None:
             break
         attempt_reasons.append(reason)

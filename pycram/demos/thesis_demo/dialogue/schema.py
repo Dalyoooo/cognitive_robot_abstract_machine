@@ -8,10 +8,15 @@ an utterance that both orders and corrects itself is instruction and context at
 once.
 :func:`aggregate` sums the changes in how many of something is needed, and
 :func:`fuse` writes the instruction handed to the planner.
+
+Shape alone does not make a change believable, so
+:func:`check_deltas_are_supported` reads each claimed change back against the
+words it came from.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -388,6 +393,100 @@ def parse_interpretation(
         ignore=tuple(ignore),
         quantity=tuple(quantity),
     )
+
+
+# %% believability of a claimed change
+
+
+NUMBER_WORDS = {
+    "zero": 0,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+}
+"""Number words the speech front-end writes out instead of as digits."""
+
+IMPLIED_AMOUNT = 1
+"""How many an utterance means when it names no number at all.
+
+"He already has a glass" counts one glass, not an unsaid number of them.
+"""
+
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def spoken_amounts(text: str) -> set[int]:
+    """Return every number the utterance names, as digits or as words.
+
+    Only whole words count, so the "one" in "someone" is not a number. ``a`` and
+    ``an`` are left out on purpose: they are too common to read as a count, and
+    the utterances that use them are covered by :data:`IMPLIED_AMOUNT`.
+    """
+    amounts = set()
+    for word in _WORD.findall(text.lower()):
+        if word.isdigit():
+            amounts.add(int(word))
+        elif word in NUMBER_WORDS:
+            amounts.add(NUMBER_WORDS[word])
+    return amounts
+
+
+def check_deltas_are_supported(
+    interpretation: Interpretation, utterances: list[SpokenUtterance]
+) -> None:
+    """Check that no utterance is read as changing more than it names.
+
+    An utterance can only ever account for as many objects as it mentions, and
+    one that mentions no number means :data:`IMPLIED_AMOUNT`. The failure this
+    catches is the model doing the arithmetic the prompt forbids: told to bring
+    three spoons and hearing "I already have one spoon", it answers ``-2`` --
+    the result of the subtraction -- where the utterance's own change is ``-1``.
+
+    The bound is on the magnitude rather than the exact number, because an
+    utterance may state a target instead of a change: "Make it two" against an
+    instruction asking for one is a delta of ``+1``, and that has to stay
+    allowed.
+
+    :raises ValueError: worded so it can be handed back to the model as a
+        correction.
+    """
+    for item in interpretation.context:
+        if not item.is_quantitative:
+            continue
+        text = utterances[item.utterance].text
+        bound = max(spoken_amounts(text), default=IMPLIED_AMOUNT)
+        if abs(item.delta) > bound:
+            # Naming the subtraction is what makes the correction land, but only
+            # a claim for fewer can have come from one; saying it to a model
+            # that claimed too many would point it the wrong way.
+            hint = (
+                "never subtract it from the number the instruction asks for"
+                if item.delta < 0
+                else "never scale it by the number the instruction asks for"
+            )
+            raise ValueError(
+                f"context.delta {item.delta} for utterance {item.utterance} "
+                f"changes more than the utterance names: {text.strip()!r} "
+                f"mentions at most {bound}. State only this utterance's own "
+                f"change; {hint}."
+            )
 
 
 # %% counting

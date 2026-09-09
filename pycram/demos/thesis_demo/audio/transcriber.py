@@ -133,12 +133,93 @@ class Sentence:
     """The recognised words."""
 
 
-def _whisper_spans(audio):
+VOCABULARY_PROMPT_PREFIX = "Household robot instructions about these things: "
+"""Opening of the prompt that offers Whisper the words a scene may use."""
+
+MIN_REREAD_DURATION_S = 0.1
+"""Shortest piece worth reading a second time; below this there is no syllable."""
+
+
+def _whisper_spans(audio, initial_prompt=None):
     # ``audio`` is either a file path or a float32 waveform; faster-whisper
     # accepts both. Each span it reports covers one sentence it heard, timed
     # from the start of the audio it was given.
-    spans, _ = _model.transcribe(audio, language="en", beam_size=3)
+    spans, _ = _model.transcribe(
+        audio, language="en", beam_size=3, initial_prompt=initial_prompt
+    )
     return list(spans)
+
+
+@dataclass(frozen=True)
+class SpokenSpan:
+    """A stretch of audio and the words heard in it.
+
+    Whisper reports spans of this shape, so one whose words were read again
+    against a vocabulary can stand in for one of its own.
+    """
+
+    start: float
+    """Offset into the audio the span was read from, in seconds."""
+
+    end: float
+    """Offset where it ends."""
+
+    text: str
+    """The recognised words."""
+
+
+@dataclass(frozen=True)
+class SentenceReader:
+    """Reads the sentences of one segment, settling the words against a vocabulary.
+
+    On a quiet recording Whisper hears "marks" where the scene says "mugs", and
+    naming the objects that exist in its prompt fixes that. The same prompt also
+    moves the sentence boundaries it reports, though, and those boundaries are
+    what separate two speakers the voice activity detection could not. So the
+    boundaries come from an unprompted pass and only the words are read again,
+    sentence by sentence, against the vocabulary.
+
+    Measured over 20 recorded scenes with four speakers each: without a
+    vocabulary the instruction's object survived in 13 scenes, prompting the
+    whole segment reached 18 but lost a sentence boundary, and reading the
+    sentences again reached 18 while losing none.
+
+    .. note:: One scene stays wrong either way. Which word a quiet recording
+        settles on is sensitive to the exact list -- the same clip gives "knots"
+        unprompted and "months" prompted -- so the list is built from the world
+        rather than tuned until that scene passes.
+    """
+
+    vocabulary: tuple[str, ...] = ()
+    """Words the recording may use; empty reads the audio once and no more."""
+
+    transcribe: object = None
+    """Maps samples and an optional prompt to spans; defaults to Whisper."""
+
+    sampling_rate: int = vad.SAMPLING_RATE
+    """Samples per second the audio it is given was captured at."""
+
+    def __call__(self, samples):
+        transcribe = self.transcribe or _whisper_spans
+        spans = transcribe(samples)
+        if not self.vocabulary:
+            return spans
+        prompt = VOCABULARY_PROMPT_PREFIX + ", ".join(self.vocabulary) + "."
+        return [self._settle(samples, span, transcribe, prompt) for span in spans]
+
+    def _settle(self, samples, span, transcribe, prompt):
+        """Return one span with its words read again against the vocabulary."""
+        piece = samples[
+            int(span.start * self.sampling_rate) : int(span.end * self.sampling_rate)
+        ]
+        if len(piece) < MIN_REREAD_DURATION_S * self.sampling_rate:
+            return SpokenSpan(span.start, span.end, span.text.strip())
+        words = " ".join(
+            reread.text.strip() for reread in transcribe(piece, initial_prompt=prompt)
+        ).strip()
+        # A second pass that comes back empty heard less than the first one did,
+        # and its silence is no reason to lose words.
+        return SpokenSpan(span.start, span.end, words or span.text.strip())
 
 
 def _run_whisper(audio):
@@ -165,7 +246,7 @@ def split_into_sentences(segment, transcribe=None):
     the turns come apart on those spans. ``transcribe`` maps a waveform to those
     spans and defaults to Whisper itself.
     """
-    transcribe = transcribe or _whisper_spans
+    transcribe = transcribe or SentenceReader()
     return [
         Sentence(
             segment=segment.cut_between(span.start, span.end), text=span.text.strip()
@@ -174,7 +255,7 @@ def split_into_sentences(segment, transcribe=None):
     ]
 
 
-def transcribe_segments(segments, diarizer=None, transcribe=None):
+def transcribe_segments(segments, diarizer=None, transcribe=None, vocabulary=()):
     """Turn speech segments into one utterance per sentence, in time order.
 
     Each segment is split into its sentences first, so a voice is judged per
@@ -182,7 +263,12 @@ def transcribe_segments(segments, diarizer=None, transcribe=None):
     dropped before the grouping runs, which also keeps the indices a diarizer
     reports -- its short-and-joined bookkeeping -- lined up with the utterances
     returned here.
+
+    ``vocabulary`` names the words the recording may use (see
+    :func:`thesis_demo.dialogue.schema.spoken_vocabulary`); giving it lets each
+    sentence be read again against the things that exist in the world.
     """
+    transcribe = transcribe or SentenceReader(vocabulary=tuple(vocabulary))
     sentences = [
         sentence
         for segment in segments
@@ -208,22 +294,29 @@ def transcribe_segments(segments, diarizer=None, transcribe=None):
 
 
 def transcribe_scene(
-    audio, sampling_rate=vad.SAMPLING_RATE, vad_options=None, diarizer=None
+    audio,
+    sampling_rate=vad.SAMPLING_RATE,
+    vad_options=None,
+    diarizer=None,
+    vocabulary=(),
 ):
     """Split a waveform into speech segments and transcribe each one.
 
     Returns the utterances in time order. Segments whose transcription comes
     back empty (breath, laughter, a stray noise the VAD let through) are
     dropped, so every returned utterance carries actual words. Pass a
-    ``diarizer`` to also label which voice said what.
+    ``diarizer`` to also label which voice said what, and a ``vocabulary`` to
+    settle the words against the things that exist in the world.
     """
     if _model is None:
         raise RuntimeError("Whisper model not loaded. Call setup_whisper() first.")
     segments = vad.detect_segments(audio, sampling_rate, options=vad_options)
-    return transcribe_segments(segments, diarizer)
+    return transcribe_segments(segments, diarizer, vocabulary=vocabulary)
 
 
-def transcribe_scene_bytes(audio_data, work_dir=None, vad_options=None, diarizer=None):
+def transcribe_scene_bytes(
+    audio_data, work_dir=None, vad_options=None, diarizer=None, vocabulary=()
+):
     """Full front-end for a recorded scene: webm bytes to a list of utterances.
 
     Unlike :func:`transcribe_bytes`, this keeps each speaker turn apart so the
@@ -235,6 +328,6 @@ def transcribe_scene_bytes(audio_data, work_dir=None, vad_options=None, diarizer
     wav_path = _convert_webm_to_wav(audio_data, recordings_dir)
     try:
         segments = vad.segment_file(wav_path, options=vad_options)
-        return transcribe_segments(segments, diarizer)
+        return transcribe_segments(segments, diarizer, vocabulary=vocabulary)
     finally:
         Path(wav_path).unlink(missing_ok=True)

@@ -8,6 +8,7 @@ utterance is worth.
 from __future__ import annotations
 
 from thesis_demo.dialogue.interpreter import interpret
+from thesis_demo.dialogue.schema import spoken_vocabulary
 
 
 def understand_scene(
@@ -32,6 +33,11 @@ def understand_scene(
     said what, which is what lets repeated identical claims from one person be
     counted once instead of several times.
 
+    The same context that decides the roles also names the things that exist, so
+    it is handed to transcription as a vocabulary: on a quiet recording Whisper
+    hears "marks" where the scene says "mugs", and an object the world has no
+    name for fails the interpretation outright.
+
     ``transcribe_scene_bytes`` is imported lazily so this module stays importable
     where faster-whisper is absent (e.g. the planner-only environment).
     """
@@ -42,6 +48,7 @@ def understand_scene(
         work_dir=work_dir,
         vad_options=vad_options,
         diarizer=diarizer,
+        vocabulary=spoken_vocabulary(context),
     )
     result = interpret(utterances, context, generate, max_attempts=max_attempts)
     return utterances, result

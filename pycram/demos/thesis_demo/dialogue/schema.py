@@ -350,6 +350,59 @@ def known_object_types(context) -> set[str] | None:
     return names or None
 
 
+# %% the words this world is spoken about in
+
+SPOKEN_NAME_BOUNDARY = re.compile(r"(?<=[a-z])(?=[A-Z])")
+"""Where a type name written as ``CoffeeTable`` splits into the words it is said as."""
+
+MASS_NOUNS = frozenset({"milk", "cereal"})
+"""Objects a kitchen scene never counts, so their plural is a word nobody says."""
+
+IRREGULAR_PLURALS = {"knife": "knives"}
+"""Plurals that adding an ``s`` would spell wrong."""
+
+VOCABULARY_SOURCES = ("surfaces", "containers", "furniture")
+"""Context keys holding places rather than objects; nobody asks for two tables."""
+
+
+def spoken_name(type_name: str) -> str:
+    """Return one world type name as the words it is spoken as."""
+    return SPOKEN_NAME_BOUNDARY.sub(" ", type_name).lower()
+
+
+def spoken_plural(word: str) -> str | None:
+    """Return the plural of one spoken object name, or None when it has none."""
+    if word in MASS_NOUNS:
+        return None
+    if word in IRREGULAR_PLURALS:
+        return IRREGULAR_PLURALS[word]
+    return f"{word}es" if word.endswith(("s", "x", "ch", "sh")) else f"{word}s"
+
+
+def spoken_vocabulary(context) -> tuple[str, ...]:
+    """Return the words a scene in this world may name, as people say them.
+
+    Speech recognition is offered these as a hint. On a quiet recording Whisper
+    hears "marks" where the scene says "mugs", and naming the things that
+    actually exist settles it. Objects come in the plural too, because a scene
+    asks for four mugs far more often than for one.
+    """
+    if not context:
+        return ()
+    words = []
+    for type_name in context.get("objects", ()):
+        word = spoken_name(type_name)
+        words.append(word)
+        plural = spoken_plural(word)
+        if plural is not None:
+            words.append(plural)
+    for key in VOCABULARY_SOURCES:
+        words.extend(spoken_name(name) for name in context.get(key, ()))
+    # The same word twice is no better a hint than once, and the context lists a
+    # table as both a surface and a piece of furniture.
+    return tuple(dict.fromkeys(words))
+
+
 def parse_interpretation(
     data, utterance_count: int, context=None
 ) -> Interpretation:

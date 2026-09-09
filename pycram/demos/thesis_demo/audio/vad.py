@@ -19,20 +19,58 @@ from faster_whisper.vad import VadOptions, get_speech_timestamps
 # and Whisper expect this rate, so every waveform here is at 16 kHz.
 SAMPLING_RATE = 16000
 
+SPEECH_PROBABILITY_THRESHOLD = 0.70
+"""How sure Silero must be before a window counts as speech.
+
+Recorded scenes sit at -20 to -29 dBFS over a noise floor around -44 dB, close
+enough that at 0.5 the room itself keeps a segment open across the gap between
+two speakers. Raising the bar makes the gap register as the silence it is.
+"""
+
+MIN_SPEECH_DURATION_MS = 400
+"""Shortest stretch that counts as speech rather than a click or a cough.
+
+At 250 ms one recording produced a 0.36 s region that transcribed to nothing:
+long enough to be kept, too short to hold a word.
+"""
+
+MIN_SILENCE_DURATION_MS = 100
+"""A gap this long ends the current utterance.
+
+This is the number that decides whether two speakers arrive as one region. In
+conversation the next person starts 100-300 ms after the last one stops, so the
+2000 ms faster-whisper defaults to -- and the 300 ms used here before -- merge
+turns that the stages downstream then cannot tell apart. Measured over 20
+recorded scenes, 300 ms cut as many regions as the script had utterances in 2
+scenes out of 20; 100 ms does so in 16.
+"""
+
+SPEECH_PAD_MS = 50
+"""How much audio either side of a region is kept, so syllables survive.
+
+Silero splits a gap shorter than twice this pad down the middle, so a pad at or
+above half of :data:`MIN_SILENCE_DURATION_MS` spends the whole silence and
+leaves one turn's boundary inside the next turn's audio.
+"""
+
 
 def default_options():
     """Voice-activity options tuned for a multi-speaker scene.
 
     faster-whisper's own defaults (2 s minimum silence) are meant to keep one
     dictation together. A household scene instead needs distinct utterances to
-    stay apart, so silences split earlier and a short pad avoids gluing a
-    background remark onto the command that precedes it.
+    stay apart, so silences split earlier and the pad stays small enough not to
+    glue a background remark onto the command that precedes it.
+
+    .. note:: A gap the VAD cannot see at all -- two speakers running into each
+        other -- is not recoverable here. That case is handled a stage later, by
+        splitting a region on the sentences Whisper reports inside it.
     """
     return VadOptions(
-        threshold=0.5,  # how sure Silero must be before a window counts as speech
-        min_speech_duration_ms=250,  # anything shorter is a click or a cough, not a word
-        min_silence_duration_ms=300,  # a gap this long ends the current utterance
-        speech_pad_ms=200,  # keep a little audio either side so syllables survive
+        threshold=SPEECH_PROBABILITY_THRESHOLD,
+        min_speech_duration_ms=MIN_SPEECH_DURATION_MS,
+        min_silence_duration_ms=MIN_SILENCE_DURATION_MS,
+        speech_pad_ms=SPEECH_PAD_MS,
     )
 
 
@@ -56,6 +94,30 @@ class SpeechSegment:
     def duration_s(self) -> float:
         """How long the segment lasts, in seconds."""
         return self.end_s - self.start_s
+
+    def cut_between(self, start_offset_s: float, end_offset_s: float) -> SpeechSegment:
+        """Return the part of this segment between two offsets from its start.
+
+        The offsets are measured from the start of this segment, which is how
+        Whisper reports the sentences it finds inside one, and they are held
+        within the segment so a span reaching past the audio cannot invent any.
+        """
+        start_offset_s = max(0.0, start_offset_s)
+        end_offset_s = min(end_offset_s, self.duration_s)
+        # An end at or before the start means the words came with no audio to
+        # judge them by; the piece is kept empty so the words are not lost, and
+        # a segment this short is left unjudged by the grouping stage.
+        end_offset_s = max(end_offset_s, start_offset_s)
+        return SpeechSegment(
+            start_s=self.start_s + start_offset_s,
+            end_s=self.start_s + end_offset_s,
+            samples=self.samples[
+                int(start_offset_s * self.sampling_rate) : int(
+                    end_offset_s * self.sampling_rate
+                )
+            ],
+            sampling_rate=self.sampling_rate,
+        )
 
 
 def detect_segments(audio, sampling_rate=SAMPLING_RATE, options=None):

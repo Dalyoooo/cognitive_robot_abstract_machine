@@ -5,13 +5,19 @@
 The scene functions run Whisper once per speech segment instead, which keeps the
 turns apart, gives each one a timestamp, and stops Whisper inventing words over
 the silence between them.
+
+Whisper also reports where each sentence sits inside the segment it was given,
+and a segment can hold more than one speaker whenever they left the VAD too
+little silence to separate them. Those spans are therefore kept rather than
+joined, so a scene comes out as one utterance per sentence, each with its own
+voice -- which is what lets the dialogue stage give each sentence its own role.
 """
 
 import os
 import subprocess
 import tempfile
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 import faster_whisper
@@ -111,11 +117,33 @@ class Utterance:
     """Which voice said it, or None while voices have not been told apart."""
 
 
-def _run_whisper(audio):
+@dataclass(frozen=True)
+class Sentence:
+    """One sentence heard inside a speech segment, with the audio it came from.
+
+    Keeping the audio beside the words is what lets each sentence be judged for
+    its own voice, instead of inheriting the voice of the whole segment it was
+    cut out of.
+    """
+
+    segment: vad.SpeechSegment
+    """The stretch of audio this sentence was heard in."""
+
+    text: str
+    """The recognised words."""
+
+
+def _whisper_spans(audio):
     # ``audio`` is either a file path or a float32 waveform; faster-whisper
-    # accepts both. One VAD segment may still be split internally, so join.
-    segments, _ = _model.transcribe(audio, language="en", beam_size=3)
-    return " ".join(segment.text.strip() for segment in segments).strip()
+    # accepts both. Each span it reports covers one sentence it heard, timed
+    # from the start of the audio it was given.
+    spans, _ = _model.transcribe(audio, language="en", beam_size=3)
+    return list(spans)
+
+
+def _run_whisper(audio):
+    """Transcribe one recording into a single line of text."""
+    return " ".join(span.text.strip() for span in _whisper_spans(audio)).strip()
 
 
 def transcribe_bytes(audio_data, work_dir=None):
@@ -129,36 +157,54 @@ def transcribe_bytes(audio_data, work_dir=None):
         Path(wav_path).unlink(missing_ok=True)
 
 
-def transcribe_segment(segment):
-    """Transcribe a single VAD speech segment into an :class:`Utterance`."""
-    if _model is None:
-        raise RuntimeError("Whisper model not loaded. Call setup_whisper() first.")
-    return Utterance(
-        text=_run_whisper(segment.samples),
-        start_s=segment.start_s,
-        end_s=segment.end_s,
-    )
+def split_into_sentences(segment, transcribe=None):
+    """Split one speech segment into the sentences that were heard inside it.
 
-
-def _transcribe_segments(segments, diarizer=None, sampling_rate=vad.SAMPLING_RATE):
-    """Transcribe every segment, labelling voices when a diarizer is given.
-
-    Voices are grouped over the untrimmed segment list so clustering sees every
-    voice in the scene, including segments whose transcription turns out empty;
-    those are dropped afterwards.
+    Two speakers who leave the VAD too little silence to separate them arrive as
+    a single segment, but Whisper still reports a span per sentence within it, so
+    the turns come apart on those spans. ``transcribe`` maps a waveform to those
+    spans and defaults to Whisper itself.
     """
-    speakers = (
-        diarizer.assign(segments) if diarizer is not None else [None] * len(segments)
-    )
-    utterances = []
-    for segment, speaker in zip(segments, speakers):
-        utterance = transcribe_segment(segment)
+    transcribe = transcribe or _whisper_spans
+    return [
+        Sentence(
+            segment=segment.cut_between(span.start, span.end), text=span.text.strip()
+        )
+        for span in transcribe(segment.samples)
+    ]
+
+
+def transcribe_segments(segments, diarizer=None, transcribe=None):
+    """Turn speech segments into one utterance per sentence, in time order.
+
+    Each segment is split into its sentences first, so a voice is judged per
+    sentence rather than per segment. Sentences that came back without words are
+    dropped before the grouping runs, which also keeps the indices a diarizer
+    reports -- its short-and-joined bookkeeping -- lined up with the utterances
+    returned here.
+    """
+    sentences = [
+        sentence
+        for segment in segments
+        for sentence in split_into_sentences(segment, transcribe)
         # Whisper returns nothing for a breath or a laugh that the VAD let
         # through, and an utterance without words has no role to play later.
-        if not utterance.text:
-            continue
-        utterances.append(replace(utterance, speaker_id=speaker))
-    return utterances
+        if sentence.text
+    ]
+    speakers = (
+        diarizer.assign([sentence.segment for sentence in sentences])
+        if diarizer is not None
+        else [None] * len(sentences)
+    )
+    return [
+        Utterance(
+            text=sentence.text,
+            start_s=sentence.segment.start_s,
+            end_s=sentence.segment.end_s,
+            speaker_id=speaker,
+        )
+        for sentence, speaker in zip(sentences, speakers)
+    ]
 
 
 def transcribe_scene(
@@ -174,7 +220,7 @@ def transcribe_scene(
     if _model is None:
         raise RuntimeError("Whisper model not loaded. Call setup_whisper() first.")
     segments = vad.detect_segments(audio, sampling_rate, options=vad_options)
-    return _transcribe_segments(segments, diarizer, sampling_rate)
+    return transcribe_segments(segments, diarizer)
 
 
 def transcribe_scene_bytes(audio_data, work_dir=None, vad_options=None, diarizer=None):
@@ -189,6 +235,6 @@ def transcribe_scene_bytes(audio_data, work_dir=None, vad_options=None, diarizer
     wav_path = _convert_webm_to_wav(audio_data, recordings_dir)
     try:
         segments = vad.segment_file(wav_path, options=vad_options)
-        return _transcribe_segments(segments, diarizer)
+        return transcribe_segments(segments, diarizer)
     finally:
         Path(wav_path).unlink(missing_ok=True)

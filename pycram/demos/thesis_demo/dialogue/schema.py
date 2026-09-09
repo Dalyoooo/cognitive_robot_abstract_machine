@@ -17,7 +17,7 @@ words it came from.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 from typing_extensions import Protocol
@@ -487,6 +487,43 @@ def check_deltas_are_supported(
                 f"mentions at most {bound}. State only this utterance's own "
                 f"change; {hint}."
             )
+
+
+def clamp_deltas_to_speech(
+    interpretation: Interpretation, utterances: list[SpokenUtterance]
+) -> tuple[Interpretation, tuple[int, ...]]:
+    """Bring every claimed change inside what its utterance names.
+
+    The same bound :func:`check_deltas_are_supported` refuses on is used here to
+    repair instead, for the case where the model was asked again and answered
+    the same way: a count that is one too many is worth acting on, where a
+    scene thrown away leaves the robot with nothing at all.
+
+    The sign is kept, because whether the utterance adds or removes was never
+    in doubt -- only how many. :attr:`ContextItem.effect` is left exactly as the
+    model wrote it: it is that utterance's own words about the task, and
+    rewriting the prose to match a number the model did not choose would be
+    inventing speech. Naming the correction belongs to whoever shows the result.
+
+    :return: the interpretation to use and the utterance indices corrected,
+        empty when every claim already fitted.
+    """
+    corrected: list[int] = []
+    items = []
+    for item in interpretation.context:
+        if item.is_quantitative:
+            bound = max(
+                spoken_amounts(utterances[item.utterance].text),
+                default=IMPLIED_AMOUNT,
+            )
+            if abs(item.delta) > bound:
+                item = replace(item, delta=bound if item.delta > 0 else -bound)
+                corrected.append(item.utterance)
+        items.append(item)
+    if not corrected:
+        return interpretation, ()
+    return replace(interpretation, context=tuple(items)), tuple(corrected)
+
 
 
 # %% counting

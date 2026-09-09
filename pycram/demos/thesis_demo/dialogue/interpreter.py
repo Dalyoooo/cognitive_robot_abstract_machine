@@ -18,6 +18,7 @@ from thesis_demo.dialogue.schema import (
     SpokenUtterance,
     aggregate,
     check_deltas_are_supported,
+    clamp_deltas_to_speech,
     fuse,
     parse_interpretation,
 )
@@ -103,6 +104,14 @@ class InterpretationResult:
     counts: Aggregate | None = None
     """How the counted constraints added up."""
 
+    corrected_claims: tuple[int, ...] = ()
+    """Utterances whose claimed change was brought inside what they name.
+
+    Non-empty only where the model kept overstating a change through every
+    attempt, so the last answer was repaired rather than discarded. The count
+    that follows is sound; the utterance's own wording of it may not be.
+    """
+
 
 # %% the loop
 
@@ -141,6 +150,24 @@ def _parse(raw_response: str, utterances: list[SpokenUtterance], context):
         return None, str(error)
 
 
+def _repair(raw_response: str, utterances: list[SpokenUtterance], context):
+    """Salvage a well-formed answer whose only fault is an over-large change.
+
+    Only the bound is repairable, and only because the bound itself says what
+    the right number was. Every other rejection -- not JSON, a missing key, an
+    object type the world does not have, an utterance left without a role --
+    would have to be guessed at, and a guessed interpretation is worse than
+    none, so those keep failing.
+    """
+    try:
+        interpretation = parse_interpretation(
+            json.loads(raw_response.strip()), len(utterances), context
+        )
+    except (json.JSONDecodeError, ValueError, KeyError, TypeError):
+        return None, ()
+    return clamp_deltas_to_speech(interpretation, utterances)
+
+
 def interpret(
     utterances: list[SpokenUtterance],
     context,
@@ -177,6 +204,15 @@ def interpret(
                 _chat_message(MessageRole.USER, _correction_message(reason)),
             ]
 
+    corrected_claims: tuple[int, ...] = ()
+    if interpretation is None:
+        # Asking again did not help. Where the only fault was a change larger
+        # than its utterance allows, the bound says what the number should have
+        # been, so the answer is worth repairing rather than dropping: a scene
+        # discarded tells the robot nothing, and leaves the demo with a table
+        # of unjudged rows.
+        interpretation, corrected_claims = _repair(raw_response, utterances, context)
+
     if interpretation is None:
         return InterpretationResult(
             outcome=Outcome.ERROR,
@@ -205,6 +241,10 @@ def interpret(
         raw_response=raw_response,
         attempts=attempts,
         counts=aggregate(interpretation, utterances),
+        corrected_claims=corrected_claims,
+        # Kept even on a repaired success: what the model actually answered is
+        # part of the record, and the reason is the only trace of it left.
+        rejection_reason=attempt_reasons[-1] if corrected_claims else None,
     )
 
 
